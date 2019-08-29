@@ -1,0 +1,62 @@
+<form>
+  <label>Customer Dashboard - Directory Lookup by Group (ETM)</label>
+  <fieldset submitButton="false">
+    <input type="dropdown" token="dataSource_token">
+      <label>Data Source</label>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+      </search>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+    </input>
+    <input type="dropdown" token="groupName_token">
+      <label>Group</label>
+      <fieldForLabel>DIRECTORY_REFERENCE</fieldForLabel>
+      <fieldForValue>DIRECTORY_REFERENCE</fieldForValue>
+      <search>
+        <query>| dbxquery 
+timeout=1800
+maxrows=350000
+connection=$dataSource_token$
+query="
+SELECT  DISTINCT dg.NAME as directory_reference
+FROM    ((DIR_GROUP dg INNER JOIN DIR_GROUP_CONTENTS dgc on dg.OID=dgc.OID)
+                       INNER JOIN DIR_LISTING dl ON dgc.MEM_OID=dl.OID)
+" shortnames=t
+| table DIRECTORY_REFERENCE</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <title>Results Table</title>
+        <search id="cdr_full">
+          <query>| dbxquery 
+timeout=1800
+maxrows=350000
+connection=$dataSource_token$
+query="
+SELECT      DISTINCT dg.NAME as GROUP_NAME,
+            CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as PHONE_NUMBER,
+            dl.LAST_NAME as last_name,
+            dl.FIRST_NAME as first_name,
+            dl.AUTH_NO as auth_no,
+            dl.COMMENTS as comments
+FROM    ((DIR_GROUP dg INNER JOIN DIR_GROUP_CONTENTS dgc on dg.OID=dgc.OID)
+                       INNER JOIN DIR_LISTING dl ON dgc.MEM_OID=dl.OID)
+WHERE    dg.NAME = '$groupName_token$'
+" shortnames=t
+| table GROUP_NAME PHONE_NUMBER LAST_NAME FIRST_NAME COMMENTS</query>
+          <earliest>0</earliest>
+          <latest></latest>
+        </search>
+        <option name="count">24</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+</form>

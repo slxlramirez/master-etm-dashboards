@@ -66,7 +66,7 @@ ORDER BY POLICY_NAME"  shortnames=t
         <option name="charting.drilldown">all</option>
         <option name="refresh.display">progressbar</option>
         <drilldown>
-          <link target="_blank">/app/search/etm__ips__outbound_intl__historical__details_single_hour?form.test_token=$click.value$&amp;form.dataSource_token=$dataSource_token$&amp;form.etmInstance_token=$etmInstance_token$&amp;form.ipsPolicyName_token=$ipsPolicyName_token$</link>
+          <link target="_blank">/app/search/etm__ips__outbound_intl__historical__details_single_hour?form.test_token=$click.value$&amp;form.dataSource_token=$dataSource_token$&amp;form.etmInstance_token=$etmInstance_token$</link>
         </drilldown>
       </chart>
     </panel>

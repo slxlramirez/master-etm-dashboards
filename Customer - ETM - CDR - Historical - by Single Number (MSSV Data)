@@ -1,0 +1,271 @@
+<form>
+  <label>Customer - ETM - CDR - Historical - by Single Number (MSSV Data)</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="dropdown" token="dataSource_token">
+      <label>Data Source</label>
+      <search>
+        <query>| inputlookup mssv_datasources.csv
+| table customer connection
+| sort customer</query>
+      </search>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>connection</fieldForValue>
+    </input>
+    <input type="dropdown" token="phoneNumberType_token">
+      <label>Int, Ext, or Both?</label>
+      <choice value="internal">Internal</choice>
+      <choice value="external">External</choice>
+      <choice value="both">Both</choice>
+    </input>
+    <input type="dropdown" token="direction_token">
+      <label>Direction</label>
+      <choice value="INBOUND">INBOUND</choice>
+      <choice value="OUTBOUND">OUTBOUND</choice>
+      <choice value="BOTH">BOTH</choice>
+    </input>
+    <input type="text" token="timechartSpan_token">
+      <label>Timechart Span (i.e. 1d or 4h)</label>
+      <default>1d</default>
+    </input>
+    <input type="text" token="phoneNumber_token">
+      <label>Phone Number (numbers only)</label>
+    </input>
+    <input type="text" token="startDate_token">
+      <label>Start Date (YYYY-MM-DD)</label>
+    </input>
+    <input type="text" token="endDate_token">
+      <label>End Date (YYYY-MM-DD)</label>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <title>Directions</title>
+        <search>
+          <query>| makeresults 
+| eval Notes="This dashboard matches characters with SQL LIKE statement which means..."
+| append
+[
+| makeresults 
+| eval Notes="You can enter any digits without any characters (like brackets or parentheses)"
+]
+| append
+[
+| makeresults 
+| eval Notes="Example 1: 21255 will match [1](212)5531234 and [1](281)2125577"
+]
+| append
+[
+| makeresults 
+| eval Notes="Example 2: 210546104 will match [1](210)5461049"
+]
+| append
+[
+| makeresults 
+| eval Notes="NOTE: Timechart applies to the X-axis of the timeseries chart"
+]
+| fields - _time</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Earliest Date for $dataSource_token$</title>
+        <search>
+          <query>| dbxquery 
+timeout=1800
+maxrows=250000
+connection=$dataSource_token$
+query="
+select  'Earlist Date in MSSV DB: '||min(datekey) as earliest_date
+FROM    dw_fk_datawarehouse_nomodel
+"
+shortnames=t 
+| table earliest_date</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Timechart of Calls and Duration (in minutes)</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(start_time_gmt,"%Y-%m-%d %H:%M:%S")
+| timechart span=$timechartSpan_token$ count sum(dur_answered_min) as duration fixedrange=false</query>
+        </search>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.axisY2.enabled">1</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.overlayFields">duration</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.layout.splitSeries">0</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Total Calls by External Numbers</title>
+        <search base="cdr">
+          <query>| stats count as "Calls", sum(dur_answered_min) as "Duration (min)" by external_number
+| rename external_number as "External Number"
+| table "External Number" "Calls" "Duration (min)"
+| sort "Calls" DESC</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Inbound Internal Numbers Called</title>
+        <search base="cdr">
+          <query>| WHERE direction="INBOUND"
+| stats count as "Calls", sum(dur_answered_min) as "Duration (min)" by internal_number
+| rename internal_number as "Internal Number"
+| table "Internal Number" "Calls" "Duration (min)"
+| sort "Calls" DESC</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>by Disposition</title>
+        <search base="cdr">
+          <query>| stats count as "Calls" by term_status
+| rename term_status as "Disposition"
+| table "Disposition" "Calls"
+| sort "Calls" DESC</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>by Direction</title>
+        <search base="cdr">
+          <query>| stats count as "Calls" by direction
+| rename direction as "Direction"
+| table "Direction" "Calls"
+| sort "Calls" DESC</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>By Call Type</title>
+        <search base="cdr">
+          <query>| stats count as "Calls" by call_type
+| rename call_type as "Call Type"
+| table "Call Type" "Calls"
+| sort "Calls" DESC</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Table Results</title>
+        <search id="cdr">
+          <query>| dbxquery 
+timeout=1800
+maxrows=500000
+connection=$dataSource_token$
+query="
+select  
+        start_time as start_time_gmt,
+        connect_time as connect_time_gmt,
+        end_time as end_time_gmt,
+        internal_number,
+        external_number,
+        ROUND(dur_offhook_min,1) as dur_offhook_min,
+        ROUND(dur_answered_min,1) as dur_answered_min,
+        direction,
+        raw_dest,
+        call_type,
+        call_flags,
+        term_status,
+        switch,
+        span_group,
+        span,
+        channel,
+        fw_policy_name,
+        fw_rule_comments
+FROM    dw_fk_datawarehouse_nomodel
+WHERE   datekey &gt;= TO_DATE('$startDate_token$','YYYY-MM-DD') AND
+        datekey  &lt; TO_DATE('$endDate_token$','YYYY-MM-DD') AND
+        CASE 
+            WHEN '$phoneNumberType_token$'='external' AND REPLACE(REPLACE(REPLACE(REPLACE(external_number,'(',''),')',''),'[',''),']','') LIKE '%$phoneNumber_token$%' THEN 1
+            WHEN '$phoneNumberType_token$'='internal' AND REPLACE(REPLACE(REPLACE(REPLACE(internal_number,'(',''),')',''),'[',''),']','') LIKE '%$phoneNumber_token$%' THEN 1
+            WHEN '$phoneNumberType_token$'='both'AND (REPLACE(REPLACE(REPLACE(REPLACE(internal_number,'(',''),')',''),'[',''),']','') LIKE '%$phoneNumber_token$%' OR REPLACE(REPLACE(REPLACE(REPLACE(external_number,'(',''),')',''),'[',''),']','') LIKE '%$phoneNumber_token$%') THEN 1
+            ELSE 0
+        END=1 AND
+        CASE 
+            WHEN direction IN ('INBOUND','OUTBOUND') AND '$direction_token$'='BOTH' THEN 1
+            WHEN direction = 'INBOUND' AND '$direction_token$'='INBOUND' THEN 1
+            WHEN direction = 'OUTBOUND' AND '$direction_token$'='OUTBOUND' THEN 1
+            ELSE 0
+         END=1
+"
+shortnames=t 
+| table start_time_gmt,
+        connect_time_gmt,
+        end_time_gmt,
+        internal_number,
+        external_number,
+        dur_offhook_min,
+        dur_answered_min,
+        direction,
+        raw_dest,
+        call_type,
+        call_flags,
+        term_status,
+        switch,
+        span_group,
+        span,
+        channel,
+        fw_policy_name,
+        fw_rule_comments
+| sort 0 start_time</query>
+          <earliest>0</earliest>
+          <latest></latest>
+        </search>
+        <option name="count">10</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

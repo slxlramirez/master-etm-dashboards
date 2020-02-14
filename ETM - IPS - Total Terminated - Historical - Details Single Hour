@@ -1,0 +1,373 @@
+<form>
+  <label>ETM - IPS - Total Terminated - Historical -  Details Single Hour</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="dropdown" token="etmInstance_token">
+      <label>Oracle Datasource</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="dataSource_token">
+      <label>MSSV Datasource</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>connection</fieldForValue>
+      <search>
+        <query>| inputlookup mssv_datasources.csv
+| table customer connection
+| sort customer</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="ipsPolicyName_token">
+      <label>IPS Policy Name</label>
+      <fieldForLabel>POLICY_NAME</fieldForLabel>
+      <fieldForValue>SPAN_GROUPS</fieldForValue>
+      <search>
+        <query>| dbxquery connection=$etmInstance_token$ query="
+SELECT ap.POLICY_NAME,
+      LISTAGG(CONCAT(CONCAT('''',a.ARRAY_NAME),''''),',') WITHIN GROUP (ORDER BY POLICY_NAME) as SPAN_GROUPS
+FROM   ((ADP_POLICY ap INNER JOIN ADP_POLICY_FILES apf ON ap.POLICY_ID=apf.POLICY_ID)
+                  LEFT OUTER JOIN ARRAY a ON a.ARRAY_ID=apf.ARRAY_ID)
+WHERE  ap.STATE = 'A' AND
+      (ap.POLICY_STATE = 2 OR ap.POLICY_STATE = 7) AND
+      (ap.POLICY_NAME &lt;&gt; 'Default' AND
+      ap.POLICY_NAME NOT LIKE '%Test%' AND
+      ap.POLICY_NAME NOT LIKE '%Old%')
+GROUP BY ap.POLICY_NAME
+ORDER BY POLICY_NAME"
+shortnames=t
+| table *</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="text" token="test_token">
+      <label>Start Time (YYYY-MM-DD-HH24-MI-SS)</label>
+    </input>
+    <input type="multiselect" token="externalNumber">
+      <label>External Number</label>
+      <valuePrefix>EXT_NUM="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <fieldForLabel>EXT_NUM_LABEL</fieldForLabel>
+      <fieldForValue>EXT_NUM_VALUE</fieldForValue>
+      <search>
+        <query>| dedup EXT_NUM
+| rename EXT_NUM AS EXT_NUM_VALUE
+| eval EXT_NUM_LABEL = EXT_NUM
+| table EXT_NUM_LABEL EXT_NUM_VALUE
+| append 
+[
+| makeresults 
+| eval EXT_NUM_LABEL="ALL"
+| eval EXT_NUM_VALUE="*"
+| fields - _time
+]
+| sort EXT_NUM</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <single>
+        <title>Total Call Count</title>
+        <search base="cdr">
+          <query>| stats count as calls sum("DUR_MIN") as duration_min avg("DUR_MIN") as duration_avg
+| eval duration_avg=round(duration_avg,1)
+| table calls duration_min duration_avg
+| rename calls as "Total Call Count" duration_min as "Duration (mins)" duration_avg as "Avg Duration"</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">none</option>
+        <option name="underLabel">Terminated calls during this interval</option>
+        <option name="useColors">1</option>
+      </single>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>by Disposition at 15secs Intervals</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(start_time,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count by term_status fixedrange=false</query>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.nullValueMode">gaps</option>
+        <option name="charting.chart.showDataLabels">none</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.layout.splitSeries">0</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>by Call Type at 1min Interval</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(start_time,"%Y-%m-%d %H:%M:%S")
+| timechart span=1m count by call_type fixedrange=false</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Top 10 External Numbers</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg dc(INT_NUM) as numbers_called by EXT_NUM
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| sort -calls
+| head 10
+| rename EXT_NUM as "External Number" calls as "Call Count" perc_total as "Percent Total" numbers_called as "Numbers Called" duration_min as "Duration Mins" duration_avg as "Average Duration"</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="color" field="Call Count">
+          <colorPalette type="minMidMax" maxColor="#D6563C" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top Exernal Numbers by Directory Name</title>
+        <search base="cdr">
+          <query>| stats count by EXT_NUM full_name
+| sort -count</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top Rules</title>
+        <search base="cdr">
+          <query>| stats count by fw_policy_name fw_rule_comments
+| sort -count</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Top 10 Internal Number</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg by INT_NUM
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table INT_NUM calls perc_total duration_min duration_avg
+| sort -calls
+| head 10
+| rename INT_NUM as "Internal Number" calls as "Call Count" perc_total as "Percent Total" numbers_called as "Numbers Called" duration_min as "Duration Mins" duration_avg as "Average Duration"</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top Unanswered Int Nums</title>
+        <search base="cdr">
+          <query>| search call_type="Unanswered"
+| stats count as calls by INT_NUM call_type
+| sort -calls
+| table INT_NUM call_type calls</query>
+        </search>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown>
+          <link target="_blank">/app/search/dashboard_support__details_for_single_internal_destination_for_ips_total_inbound_historical?dataSource_token=$dataSource_token$&amp;etmInstance_token=$etmInstance_token$&amp;test_token=$test_token$&amp;phoneNumber_token=$click.value$</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>By Call Types</title>
+        <search base="cdr">
+          <query>| stats count by call_type
+| sort -count
+| head 10
+| rename TYPE as "Call Types"
+|eval call_type=call_type ." (" . count . ")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>By Disposition</title>
+        <search base="cdr">
+          <query>| stats count by term_status
+| sort -count
+| head 10
+|eval term_status=term_status ." (" . count . ")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Distribution by Span Group</title>
+        <search base="cdr">
+          <query>| stats count by SPANGROUP
+| sort -calls
+|eval SPANGROUP=SPANGROUP ." (" . count . ")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Distribution by Switch Name</title>
+        <search base="cdr">
+          <query>| stats count by switch
+| sort -calls
+|eval switch=switch . " (" . count . ")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <search id="cdr">
+          <query>| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query=" select * FROM
+( select  
+        start_time,
+        connect_time,
+        end_time,
+        internal_number,
+        external_number,
+        ROUND(dur_offhook_min,1) as dur_offhook_min,
+        ROUND(dur_answered_min,1) as dur_answered_min,
+        direction,
+        raw_dest,
+        call_type,
+        call_flags,
+        term_status,
+        switch,
+        span_group,
+        span,
+        channel,
+        fw_policy_name,
+        fw_rule_comments
+FROM    dw_fk_datawarehouse_nomodel
+WHERE   start_time &gt;= TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') AND
+        start_time  &lt; TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') + interval '1 hour' AND 
+                                datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') AND
+                                datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') + interval '1 day' AND
+        term_status= 'TERMINATED'
+        ) y
+LEFT OUTER JOIN 
+(
+SELECT  CONCAT(CONCAT(LAST_NAME,', '),FIRST_NAME) as full_name,
+        last_name,
+        first_name,
+        comments,
+        group_name,
+        directory_number
+FROM
+(
+SELECT  directory_number,
+        last_name,
+        first_name,
+        group_name,
+        comments,
+        row_number() over (partition by directory_number order by last_name) as rn
+FROM
+(
+SELECT  dl.directory_number,
+        dl.last_name,
+        dl.first_name,
+        dl.group_name,
+        dl.comments
+FROM    etm_directory dl
+) a
+ORDER BY directory_number	
+) s WHERE rn=1
+) z
+
+ON y.external_number=z.directory_number
+
+"
+shortnames=t
+ | rename span_group as SPANGROUP
+ |rename internal_number as INT_NUM 
+ |rename external_number as EXT_NUM
+ | table start_time,
+        connect_time,
+        end_time,
+        INT_NUM,
+        EXT_NUM,
+        dur_offhook_min,
+        dur_answered_min,
+        full_name,
+        direction,
+        raw_dest,
+        call_type,
+        call_flags,
+        term_status,
+        switch,
+        SPANGROUP,
+        span,
+        channel,
+        fw_policy_name,
+        fw_rule_comments
+| sort 0 start_time</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

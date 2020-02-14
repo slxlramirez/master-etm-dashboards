@@ -1,0 +1,124 @@
+<form>
+  <label>ETM - IPS - Outbound INTL - Historical</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="dropdown" token="etmInstance_token">
+      <label>Oracle Data Source</label>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+      </search>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+    </input>
+    <input type="dropdown" token="dataSource_token">
+      <label>MSSV Data Source</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>connection</fieldForValue>
+      <search>
+        <query>|inputlookup mssv_datasources.csv
+|table customer connection</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="ipsPolicyName_token">
+      <label>IPS Policy Name</label>
+      <fieldForLabel>POLICY_NAME</fieldForLabel>
+      <fieldForValue>POLICY_NAME</fieldForValue>
+      <search>
+        <query>| dbxquery connection=$etmInstance_token$ query="SELECT 
+    DISTINCT ap.POLICY_NAME
+FROM ADP_POLICY ap
+WHERE
+    ap.STATE = 'A' AND
+    (ap.POLICY_STATE = 2 OR ap.POLICY_STATE = 7) AND
+    (ap.POLICY_NAME &lt;&gt; 'Default' AND 
+     ap.POLICY_NAME NOT LIKE '%Test%' AND
+     ap.POLICY_NAME NOT LIKE '%Old%')
+ORDER BY POLICY_NAME"  shortnames=t 
+| table POLICY_NAME</query>
+      </search>
+    </input>
+    <input type="dropdown" token="cntDur_token">
+      <label>Count or Duration</label>
+      <choice value="CNT">Count</choice>
+      <choice value="DUR">Duration</choice>
+      <default>CNT</default>
+    </input>
+    <input type="text" token="startDate_token">
+      <label>Start Date (YYYY-MM-DD)</label>
+    </input>
+    <input type="text" token="endDate_token">
+      <label>End Date (YYYY-MM-DD)</label>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <chart>
+        <title>IPS Stats (GMT timezone)</title>
+        <search base="cdr">
+          <query>| chart sum(VALUE) by TIME CATEGORY</query>
+        </search>
+        <option name="charting.axisY2.enabled">0</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.overlayFields">THRESHOLD</option>
+        <option name="charting.chart.showDataLabels">none</option>
+        <option name="charting.drilldown">all</option>
+        <option name="refresh.display">progressbar</option>
+        <drilldown>
+          <link target="_blank">/app/search/etm__ips__outbound_intl__historical__details_single_hour?form.test_token=$click.value$&amp;form.dataSource_token=$dataSource_token$&amp;form.etmInstance_token=$etmInstance_token$&amp;form.ipsPolicyName_token=$ipsPolicyName_token$</link>
+        </drilldown>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Table Results</title>
+        <search id="cdr">
+          <query>| dbxquery 
+connection=$etmInstance_token$
+query="
+WITH
+IPS_DATA AS
+(
+SELECT apr.COMMENTS,
+       TO_CHAR(INTERVAL_START_TIME, 'YYYY-MM-DD-hh24-mi-ss') as Time,
+        CASE    WHEN '$cntDur_token|u$'='CNT' THEN (al.COMPLETED_COUNT + al.CURRENT_COUNT)
+                WHEN '$cntDur_token|u$'='DUR' THEN ROUND((al.COMPLETED_DURATION + al.CURRENT_DURATION)/1000/60/60,1)
+    	ELSE 0
+	END as A,
+	CASE    WHEN '$cntDur_token|u$'='CNT' THEN ar.COUNT
+	        WHEN '$cntDur_token|u$'='DUR' THEN (ar.DURATION/1000/60/60)
+		ELSE 0
+	END as B
+ FROM (((ADP_LOG al INNER JOIN ADP_POLICY ap ON al.policy_oid = ap.oid)
+        INNER JOIN ADP_POLICY_RULES apr ON (al.policy_oid = apr.policy_oid AND al.rule_oid=apr.rule_oid))
+        INNER JOIN ADP_RULES ar on (apr.rule_oid = ar.oid AND apr.version = ar.version))
+WHERE
+    	INTERVAL_START_TIME &gt;= NEW_TIME(TO_DATE('$startDate_token$','YYYY-MM-DD'),'CDT','GMT') AND
+    	INTERVAL_START_TIME  &lt; NEW_TIME(TO_DATE('$endDate_token$','YYYY-MM-DD'),'CDT','GMT') AND
+	     apr.COMMENTS LIKE '%Outbound INTL%' AND utl_url.escape(ap.POLICY_NAME) = '$ipsPolicyName_token|u$' AND
+	     apr.COMMENTS NOT LIKE '%Caribbean%' AND utl_url.escape(ap.POLICY_NAME) = '$ipsPolicyName_token|u$'
+	      AND
+	     apr.COMMENTS NOT LIKE '%Terminate%' AND utl_url.escape(ap.POLICY_NAME) = '$ipsPolicyName_token|u$'
+ORDER BY apr.COMMENTS, TO_CHAR(INTERVAL_START_TIME, 'YYYY/MM/DD hh24:mi')
+)
+SELECT COMMENTS, TIME, 'CURRENT' as Category, A as Value
+FROM IPS_DATA
+UNION ALL
+SELECT COMMENTS, TIME, 'THRESHOLD' as Category, B as Value
+FROM IPS_DATA
+ORDER BY 1, 2"
+shortnames=t
+| table COMMENTS TIME CATEGORY VALUE
+| sort COMMENTS TIME CATEGORY</query>
+          <earliest>0</earliest>
+          <latest></latest>
+        </search>
+        <option name="count">10</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+</form>

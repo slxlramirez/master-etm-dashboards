@@ -1,0 +1,278 @@
+<form>
+  <label>ETM - IPS - Outbound INTL - Active - Details Single Hour</label>
+  <fieldset submitButton="false">
+    <input type="dropdown" token="dataSource_token">
+      <label>Data Source</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="ipsPolicyName_token">
+      <label>IPS Policy Name</label>
+      <fieldForLabel>POLICY_NAME</fieldForLabel>
+      <fieldForValue>SPAN_GROUPS</fieldForValue>
+      <search>
+        <query>| dbxquery connection=$dataSource_token$ query="
+SELECT ap.POLICY_NAME,
+      LISTAGG(CONCAT(CONCAT('''',a.ARRAY_NAME),''''),',') WITHIN GROUP (ORDER BY POLICY_NAME) as SPAN_GROUPS
+FROM   ((ADP_POLICY ap INNER JOIN ADP_POLICY_FILES apf ON ap.POLICY_ID=apf.POLICY_ID)
+                  LEFT OUTER JOIN ARRAY a ON a.ARRAY_ID=apf.ARRAY_ID)
+WHERE  ap.STATE = 'A' AND
+      (ap.POLICY_STATE = 2 OR ap.POLICY_STATE = 7) AND
+      (ap.POLICY_NAME &lt;&gt; 'Default' AND
+      ap.POLICY_NAME NOT LIKE '%Test%' AND
+      ap.POLICY_NAME NOT LIKE '%Old%')
+GROUP BY ap.POLICY_NAME
+ORDER BY POLICY_NAME"
+shortnames=t
+| table *</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="text" token="test_token">
+      <label>Start Time (YYYY-MM-DD-HH24-MI-SS)</label>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <title>Total Calls</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg
+| eval duration_avg=round(duration_avg,1)
+| table calls duration_min duration_avg
+| rename calls as "Total Call Count" duration_min as "Duration (mins)" duration_avg as "Avg Duration"</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Calls by 15s Intervals</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count by TERM_STATUS</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>By Call Types</title>
+        <search base="cdr">
+          <query>| stats count by TYPE
+| sort -count
+| head 10
+|eval TYPE=TYPE ." (" . count . ")"
+| rename TYPE as "Call Types"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Calls by Country</title>
+        <search base="cdr">
+          <query>| stats count as calls by COUNTRY
+| sort calls DESC</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>By Disposition</title>
+        <search base="cdr">
+          <query>| stats count by TERM_STATUS
+| sort -count
+| head 10
+|eval TERM_STATUS=TERM_STATUS ." (" . count . ")"
+| rename TERM_STATUS as "Termination Status"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Top 10 External Numbers</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg by EXT_NUM COUNTRY
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table EXT_NUM COUNTRY calls perc_total duration_min duration_avg 
+| rename EXT_NUM as "External Number" COUNTRY as "Country"
+| sort -calls
+| head 10</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top Destinations By Country</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg by COUNTRY
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table COUNTRY calls perc_total duration_min duration_avg 
+| sort calls DESC
+| head 10</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Top 10 Internal Number</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg by INT_NUM
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table INT_NUM calls perc_total duration_min duration_avg 
+| rename INT_NUM as "Internal Number"
+| sort -calls
+| head 10</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Calls by Internal to Destination (sorted by duration_min)</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg by INT_NUM EXT_NUM COUNTRY
+| eval duration_avg=round(duration_avg,1) 
+| sort -duration_min</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <search id="cdr">
+          <query>| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="SELECT    TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS') as START_TIME,
+        TO_CHAR(c.start_time,'YYYY-MM-DD HH24:MI:SS') as START_TIME_GMT,
+        CASE
+           WHEN TO_CHAR(c.end_time,'YYYY-MM-DD HH24:MI:SS') = '1970-01-01 00:00:00' THEN 'ACTIVE_CALL'
+           ELSE TO_CHAR(c.end_time,'YYYY-MM-DD HH24:MI:SS') 
+        END as END_TIME_GMT,
+        sw.SWITCH_NAME as SWITCH_NAME,
+    	NVL(DECODE(c.direction,1,c.destination,0,c.source),'UNDEFINED') AS EXT_NUM,
+    	regexp_substr(c.destination, '^\\[(\\d+)\\]',1,1,'',1) as regioncode,
+    	regexp_substr(c.destination, '^\[1\]\((\d{3})\)',1,1,'',1) as nationalnumber,
+        NVL(DECODE(c.direction,0,c.destination,1,c.source),'UNDEFINED') AS INT_NUM,
+	CASE 
+	  WHEN TO_CHAR(end_time,'YYYY-MM-DD') = '1970-01-01' THEN 'ACTIVE_CALL'
+	  ELSE TO_CHAR(ROUND((end_time-start_time)*24*60,2))
+	END as DUR_MIN,
+	CASE c.direction
+		WHEN 0 THEN 'IN'
+		WHEN 1 THEN 'OUT'
+		ELSE 'UNKNOWN'
+	END as DRCTN,
+	CALL_FLAGS as CALL_DETAILS,
+    CASE ca.types
+		WHEN 1   THEN 'FAX'
+		WHEN 2   THEN 'MODEM'
+		WHEN 4   THEN 'VOICE'
+    	WHEN 8   THEN 'UNDETERMINED'
+		WHEN 128 THEN 'BUSY'
+		WHEN 256 THEN 'UNANSWERED'
+		ELSE 'OTHER'
+    END AS TYPE,
+    a.array_name as SPANGROUP,
+    CASE t.disposition
+	    WHEN 0 THEN 'TERMINATED'
+	    WHEN 1 THEN 'TERMINATE-DISABLE'
+	    WHEN 2 THEN 'ALLOW'
+	    WHEN 3 THEN 'TERM_FAILED_CALL_ENDED'
+	    ELSE 'ALLOW'
+    END as TERM_STATUS
+    FROM 	((((((((ADP_POLICY ap INNER JOIN ADP_POLICY_FILES apf ON ap.POLICY_ID=apf.POLICY_ID)
+                   LEFT OUTER JOIN ARRAY a ON a.ARRAY_ID=apf.ARRAY_ID)
+                   LEFT OUTER JOIN ARRAY_CONTENTS ac ON a.OID=ac.ARRAY_OID)
+                   LEFT OUTER JOIN ACTIVE_CALL c ON c.SENSOR_OID=ac.SENSOR_OID)
+                   LEFT OUTER JOIN ACTIVE_CALL_ADJUNCT ca ON c.CALL_OID=ca.CALL_OID)
+                   LEFT OUTER JOIN switch_contents sc ON c.sensor_oid=sc.sensor_oid)
+                   LEFT OUTER JOIN switch sw on sw.switch_oid=sc.switch_oid)
+                   LEFT OUTER JOIN ACTIVE_terminations t ON c.call_oid=t.call_oid)
+    WHERE c.CALL_FLAGS &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 1  AND
+          c.call_flags LIKE '%INTL%' AND 
+          (
+          (
+            c.start_time &gt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss') AND
+              (
+                c.start_time  &lt; to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss')+(1/24) OR
+                c.end_time  = to_date(utl_url.unescape('1970-01-01%2000%3A00%3A00'),'YYYY-MM-DD hh24:mi:ss') 
+              )
+          ) OR
+          (
+            c.start_time &lt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss') AND
+              (
+                c.end_time  &gt; to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss') OR
+                c.end_time  = to_date(utl_url.unescape('1970-01-01%2000%3A00%3A00'),'YYYY-MM-DD hh24:mi:ss') 
+              )
+          ) 
+          ) AND
+          --c.start_time &gt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss')-(1/24) AND
+          --c.start_time &gt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss')-(12/24) AND
+          --c.start_time  &lt; to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss')+(1/24) AND
+          ap.policy_name = utl_url.unescape('$ipsPolicyName_token|u$')
+ORDER BY
+	TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS')" shortnames=t
+| join type=left REGIONCODE [| inputlookup ccmi_lookup_v2.csv | table regioncode country | where regioncode!=1 | dedup regioncode | rename regioncode as "REGIONCODE" country as "COUNTRY" | sort 0 regioncode]
+| join type=left REGIONCODE, NATIONALNUMBER [| inputlookup ccmi_lookup_v2.csv | table regioncode nationalnumber country | rename regioncode as "REGIONCODE" nationalnumber as "NATIONALNUMBER" country as "COUNTRY" | sort 0 regioncode]
+| TABLE START_TIME START_TIME_GMT END_TIME_GMT SWITCH_NAME EXT_NUM REGIONCODE NATIONALNUMBER COUNTRY INT_NUM DUR_MIN DRCTN CALL_DETAILS TYPE SPANGROUP TERM_STATUS</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

@@ -1,0 +1,386 @@
+<form>
+  <label>ETM - IPS - Total Terminated - Active -  Details Single Hour</label>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="dropdown" token="etmInstance_token">
+      <label>Oracle Datasource</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="ipsPolicyName_token">
+      <label>IPS Policy Name</label>
+      <fieldForLabel>POLICY_NAME</fieldForLabel>
+      <fieldForValue>SPAN_GROUPS</fieldForValue>
+      <search>
+        <query>| dbxquery connection=$etmInstance_token$ query="
+SELECT ap.POLICY_NAME,
+      LISTAGG(CONCAT(CONCAT('''',a.ARRAY_NAME),''''),',') WITHIN GROUP (ORDER BY POLICY_NAME) as SPAN_GROUPS
+FROM   ((ADP_POLICY ap INNER JOIN ADP_POLICY_FILES apf ON ap.POLICY_ID=apf.POLICY_ID)
+                  LEFT OUTER JOIN ARRAY a ON a.ARRAY_ID=apf.ARRAY_ID)
+WHERE  ap.STATE = 'A' AND
+      (ap.POLICY_STATE = 2 OR ap.POLICY_STATE = 7) AND
+      (ap.POLICY_NAME &lt;&gt; 'Default' AND
+      ap.POLICY_NAME NOT LIKE '%Test%' AND
+      ap.POLICY_NAME NOT LIKE '%Old%')
+GROUP BY ap.POLICY_NAME
+ORDER BY POLICY_NAME"
+shortnames=t
+| table *</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="text" token="test_token">
+      <label>Start Time (YYYY-MM-DD-HH24-MI-SS)</label>
+    </input>
+    <input type="multiselect" token="externalNumberTwo_token">
+      <label>External Number</label>
+      <fieldForLabel>EXT_NUM_LABEL</fieldForLabel>
+      <fieldForValue>EXT_NUM_VALUE</fieldForValue>
+      <search base="cdr">
+        <query>| dedup EXT_NUM
+| rename EXT_NUM AS EXT_NUM_VALUE
+| eval EXT_NUM_LABEL = EXT_NUM
+| table EXT_NUM_LABEL EXT_NUM_VALUE
+| append 
+[
+| makeresults 
+| eval EXT_NUM_LABEL="ALL"
+| eval EXT_NUM_VALUE="*"
+| fields - _time
+]
+| sort EXT_NUM</query>
+      </search>
+      <valuePrefix>EXT_NUM="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+      <default>*</default>
+      <initialValue>*</initialValue>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Terminated Calls by 1 minute intervals</title>
+      <chart>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=1m count by EXT_NUM</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.nullValueMode">zero</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <single>
+        <title>Total Terminated Calls (Selected Interval)</title>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+| stats count as "Total Terminated"</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <single>
+        <title>Distinct Terminated Callers</title>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+|stats dc(EXT_NUM)</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <table>
+        <title>by FW RULE COMMENTS</title>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+| stats count by FW_RULE_COMMENTS
+| sort -count</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Distinct Categories of Callers</title>
+      <single>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+|stats dc(FULL_NAME)</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Callers by Category</title>
+      <chart>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+|stats count by FULL_NAME
+|eval FULL_NAME=FULL_NAME . " (" . count . ")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="charting.chart.showPercent">true</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Terminated Calls by 15s Intervals</title>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count by TERM_STATUS</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Call by Span Group</title>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+| stats count by SPANGROUP
+| sort -calls</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <table>
+        <title>Top Callers</title>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+|stats count by EXT_NUM FULL_NAME 
+|sort -count
+|head 10 
+|rename EXT_NUM as "External Number"
+|rename FULL_NAME as "Category"</query>
+        </search>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top Called</title>
+        <search base="cdr">
+          <query>| search $externalNumberTwo_token$
+| stats count by INT_NUM
+| sort -count
+| head 10</query>
+        </search>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>All Terminated in Active Table</title>
+        <search>
+          <query>| dbxquery 
+timeout=1800
+connection=$etmInstance_token$
+query="
+SELECT TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS') as START_TIME,
+       --TO_CHAR(c.start_time,'YYYY-MM-DD HH24:MI') as START_TIME,
+       COUNT(c.call_oid) as calls 
+FROM   ACTIVE_CALL c LEFT OUTER JOIN ACTIVE_TERMINATIONS t ON c.call_oid=t.call_oid
+WHERE  --c.end_time  &gt; to_date(utl_url.unescape('2019-07-12%2013%3A00%3A00'),'YYYY-MM-DD hh24:mi:ss') OR
+       c.end_time  &lt;&gt; to_date(utl_url.unescape('1970-01-01%2000%3A00%3A00'),'YYYY-MM-DD hh24:mi:ss') 
+GROUP BY TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS')
+ORDER BY TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS')
+"
+shortnames=t
+|  eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M")
+| timechart span=1m sum(CALLS) as calls fixedrange=true</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <search id="cdr">
+          <query>| dbxquery 
+timeout=1800
+connection=$etmInstance_token$
+query="
+SELECT y.*,s.FULL_NAME FROM
+(
+SELECT    TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS') as START_TIME,
+        TO_CHAR(c.start_time,'YYYY-MM-DD-HH24-MI-SS') as START_TIME_GMT,
+        CASE
+           WHEN TO_CHAR(c.end_time,'YYYY-MM-DD HH24:MI:SS') = '1970-01-01 00:00:00' THEN 'ACTIVE_CALL'
+           ELSE TO_CHAR(c.end_time,'YYYY-MM-DD HH24:MI:SS') 
+        END as END_TIME_GMT,
+        sw.SWITCH_NAME as SWITCH_NAME,
+    	NVL(DECODE(c.direction,1,c.destination,0,c.source),'UNDEFINED') AS EXT_NUM,
+    	regexp_substr(c.destination, '^\\[(\\d+)\\]',1,1,'',1) as regioncode,
+    	regexp_substr(c.destination, '^\[1\]\((\d{3})\)',1,1,'',1) as nationalnumber,
+        NVL(DECODE(c.direction,0,c.destination,1,c.source),'UNDEFINED') AS INT_NUM,
+	CASE 
+	  WHEN TO_CHAR(end_time,'YYYY-MM-DD') = '1970-01-01' THEN 'ACTIVE_CALL'
+	  ELSE TO_CHAR(ROUND((end_time-start_time)*24*60,2))
+	END as DUR_MIN,
+	CASE c.direction
+		WHEN 0 THEN 'IN'
+		WHEN 1 THEN 'OUT'
+		ELSE 'UNKNOWN'
+	END as DRCTN,
+	CALL_FLAGS as CALL_DETAILS,
+    CASE ca.types
+		WHEN 1   THEN 'FAX'
+		WHEN 2   THEN 'MODEM'
+		WHEN 4   THEN 'VOICE'
+    	WHEN 8   THEN 'UNDETERMINED'
+		WHEN 128 THEN 'BUSY'
+		WHEN 256 THEN 'UNANSWERED'
+		ELSE 'OTHER'
+    END AS TYPE,
+    a.array_name as SPANGROUP,
+    CASE t.disposition
+	    WHEN 0 THEN 'TERMINATED'
+	    WHEN 1 THEN 'TERMINATE-DISABLE'
+	    WHEN 2 THEN 'ALLOW'
+	    WHEN 3 THEN 'TERM_FAILED_CALL_ENDED'
+	    ELSE 'ALLOW'
+    END as TERM_STATUS,
+        tlog.fw_policy_name,
+        tlog.fw_rule_num as fw_rule_number,
+        (replace(tlog.fw_rule_comments, chr(10),'')) as fw_rule_comments
+    FROM 	(((((((((ADP_POLICY ap INNER JOIN ADP_POLICY_FILES apf ON ap.POLICY_ID=apf.POLICY_ID)
+                   LEFT OUTER JOIN ARRAY a ON a.ARRAY_ID=apf.ARRAY_ID)
+                   LEFT OUTER JOIN ARRAY_CONTENTS ac ON a.OID=ac.ARRAY_OID)
+                   LEFT OUTER JOIN ACTIVE_CALL c ON c.SENSOR_OID=ac.SENSOR_OID)
+                   LEFT OUTER JOIN ACTIVE_CALL_ADJUNCT ca ON c.CALL_OID=ca.CALL_OID)
+                   LEFT OUTER JOIN switch_contents sc ON c.sensor_oid=sc.sensor_oid)
+                   LEFT OUTER JOIN switch sw on sw.switch_oid=sc.switch_oid)
+                   LEFT OUTER JOIN ACTIVE_terminations t ON c.call_oid=t.call_oid)
+                   LEFT OUTER JOIN
+                   (
+
+            SELECT  a.call_oid,
+                 a.POLICY_NAME as fw_policy_name,
+                rtrim(XMLAGG(XMLELEMENT("X",a.RULE_NUM||',')).extract('//text()'),',') fw_rule_num,
+                rtrim(XMLAGG(XMLELEMENT("X",a.RULE_COMMENTS||',')).extract('//text()'),',') as fw_rule_comments
+            FROM
+            (
+            SELECT  TO_CHAR(c.call_oid) as call_oid,
+                p.POLICY_NAME,
+                t.rule_num,
+                CASE t.rule_num
+                    WHEN 0 THEN 'DEFAULT EMRG'
+                    WHEN 9999 THEN 'DEFAULT ALLOW'
+                    ELSE pr.COMMENTS
+                END as rule_comments
+            FROM     (((ACTIVE_CALL c INNER JOIN ACTIVE_TRIGGER_LOG t ON c.CALL_OID=t.CALL_OID)
+                    INNER JOIN POLICY p ON p.OID=t.POLICY_OID)
+                    INNER JOIN POLICY_RULES pr ON t.POLICY_OID=pr.POLICY_OID and t.RULE_NUM=pr.RULE_NUM)
+            WHERE     c.END_TIME &lt;&gt; TO_DATE('1970-01-01','YYYY-MM-DD') AND
+                      c.END_TIME &gt; sysdate - 2
+            ) a
+            GROUP BY a.call_oid, a.policy_name
+            ) tlog ON c.call_oid=tlog.call_oid)
+    WHERE c.CALL_FLAGS &lt;&gt; 'CDRIMPORTED' AND
+          t.disposition = 0 AND
+          (
+          (
+            c.start_time &gt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD-hh24-mi-ss') AND
+              (
+                c.start_time  &lt; to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD-hh24-mi-ss')+(1/24) OR
+                c.end_time  = to_date(utl_url.unescape('1970-01-01%2000%3A00%3A00'),'YYYY-MM-DD-hh24-mi-ss') 
+              )
+          ) OR
+          (
+            c.start_time &lt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD-hh24-mi-ss') AND
+            c.start_time &gt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD-hh24:mi-ss')-1 AND
+              (
+                c.end_time  &gt; to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD-hh24-mi-ss') OR
+                c.end_time  = to_date(utl_url.unescape('1970-01-01%2000%3A00%3A00'),'YYYY-MM-DD-hh24-mi-ss') 
+              )
+          ) 
+          ) AND
+          ap.policy_name = utl_url.unescape('$ipsPolicyName_token|u$')
+ORDER BY
+	TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD-HH24-MI-SS')
+) y LEFT OUTER JOIN
+(
+SELECT  CONCAT(CONCAT(LAST_NAME,', '),FIRST_NAME) as full_name,
+        LAST_NAME as last_name,
+        FIRST_NAME as first_name,
+        COMMENTS as comments,
+        AUTH_NO as auth_no,
+        directory_number as EXT_NUM
+FROM
+(
+SELECT  directory_number,
+        LAST_NAME,
+        FIRST_NAME,
+        AUTH_NO,
+        COMMENTS,
+        row_number() over (partition by directory_number order by last_name) as rn
+FROM
+(
+SELECT  CONCAT(CONCAT(CONCAT(CONCAT(CONCAT(CONCAT('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as directory_number,
+        dl.LAST_NAME,
+        dl.FIRST_NAME,
+        dl.AUTH_NO,
+        dl.COMMENTS
+FROM    DIR_LISTING dl
+)
+) a WHERE rn=1
+ORDER BY directory_number	
+) s ON y.EXT_NUM=s.EXT_NUM
+"
+shortnames=t
+| join type=left REGIONCODE [| inputlookup ccmi_lookup_v2.csv | table regioncode country | where regioncode!=1 | dedup regioncode | rename regioncode as "REGIONCODE" country as "COUNTRY" | sort 0 regioncode]
+| join type=left REGIONCODE, NATIONALNUMBER [| inputlookup ccmi_lookup_v2.csv | table regioncode nationalnumber country | rename regioncode as "REGIONCODE" nationalnumber as "NATIONALNUMBER" country as "COUNTRY" | sort 0 regioncode]
+| TABLE START_TIME START_TIME_GMT END_TIME_GMT SWITCH_NAME EXT_NUM FULL_NAME REGIONCODE NATIONALNUMBER COUNTRY INT_NUM DUR_MIN DRCTN CALL_DETAILS TYPE SPANGROUP TERM_STATUS FW_POLICY_NAME FW_RULE_NUMBER FW_RULE_COMMENTS</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

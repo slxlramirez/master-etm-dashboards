@@ -1,0 +1,524 @@
+<form>
+  <label>ETM - IPS - Total Inbound - Active - Details Single Hour</label>
+  <fieldset submitButton="true" autoRun="false">
+    <input type="dropdown" token="etmInstance_token">
+      <label>Oracle Datasource</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="ipsPolicyName_token" searchWhenChanged="true">
+      <label>IPS Policy Name</label>
+      <fieldForLabel>POLICY_NAME</fieldForLabel>
+      <fieldForValue>SPAN_GROUPS</fieldForValue>
+      <search>
+        <query>| dbxquery connection=$etmInstance_token$ query="
+SELECT ap.POLICY_NAME,
+      LISTAGG(CONCAT(CONCAT('''',a.ARRAY_NAME),''''),',') WITHIN GROUP (ORDER BY POLICY_NAME) as SPAN_GROUPS
+FROM   ((ADP_POLICY ap INNER JOIN ADP_POLICY_FILES apf ON ap.POLICY_ID=apf.POLICY_ID)
+                  LEFT OUTER JOIN ARRAY a ON a.ARRAY_ID=apf.ARRAY_ID)
+WHERE  ap.STATE = 'A' AND
+      (ap.POLICY_STATE = 2 OR ap.POLICY_STATE = 7) AND
+      (ap.POLICY_NAME &lt;&gt; 'Default' AND
+      ap.POLICY_NAME NOT LIKE '%Test%' AND
+      ap.POLICY_NAME NOT LIKE '%Old%')
+GROUP BY ap.POLICY_NAME
+ORDER BY POLICY_NAME"
+shortnames=t
+| table *</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="dataSource_token" searchWhenChanged="true">
+      <label>MSSV Data Source</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>connection</fieldForValue>
+      <search>
+        <query>| inputlookup mssv_datasources.csv
+| table customer connection
+| sort customer</query>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="text" token="test_token">
+      <label>Start Time (YYYY-MM-DD-HH24-MI-SS)</label>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <title>High Level Stats (Allowed &amp; Terminated ...so All Calls...)</title>
+        <search base="cdr">
+          <query>| stats count as calls sum("DUR_MIN") as duration_min avg("DUR_MIN") as duration_avg by TERM_STATUS
+| eval duration_avg=round(duration_avg,1)
+| table TERM_STATUS calls duration_min duration_avg
+| rename TERM_STATUS as "Disposition" calls as "Total Call Count" duration_min as "Duration (mins)" duration_avg as "Avg Duration"</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <search base="trendcdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H")
+| timechart span=1w sum(CALLS) as calls sum(INTERNAL_NUMBERS) as "#s calling" sum(EXTERNAL_NUMBERS) as "#s called"</query>
+        </search>
+        <option name="charting.axisTitleY.visibility">collapsed</option>
+        <option name="charting.chart">bar</option>
+        <option name="charting.chart.overlayFields">calls</option>
+        <option name="charting.chart.showDataLabels">all</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>by Disposition at 15s Intervals</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count by TERM_STATUS</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>by Call Type at 15secs Intervals</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count by TYPE fixedrange=false</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>By Call Types</title>
+        <search base="cdr">
+          <query>| eval NEW_TYPE=TYPE."(".TERM_STATUS.")"
+| stats count by NEW_TYPE
+| sort -count
+| head 10
+| rename NEW_TYPE as "Call Types"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Distinct Callers</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s dc(INT_NUM) as "Int. #s Called" dc(EXT_NUM) as "Ext. #s Calling" avg(DUR_MIN) as "Avg Dur (m.)" fixedrange=false</query>
+        </search>
+        <option name="charting.axisY2.enabled">1</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.chart.overlayFields">"Avg Dur (m.)"</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>by Span Group</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count as calls by SPANGROUP fixedrange=false</query>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Top 10 External Numbers</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg dc(INT_NUM) as numbers_called by EXT_NUM TYPE TERM_STATUS
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table EXT_NUM TYPE TERM_STATUS calls perc_total numbers_called duration_min duration_avg 
+| sort -calls
+| head 10
+| rename EXT_NUM as "External Number" TYPE as "Call Type" TERM_STATUS as "Disposition" calls as "Call Count" perc_total as "Percent Total" numbers_called as "Numbers Called" duration_min as "Duration Mins" duration_avg as "Average Duration"</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="color" field="Call Count">
+          <colorPalette type="minMidMax" maxColor="#D6563C" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="Numbers Called">
+          <colorPalette type="minMidMax" maxColor="#D6563C" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top 10 Internal Number</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg by INT_NUM TYPE TERM_STATUS
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table INT_NUM TYPE TERM_STATUS calls perc_total duration_min duration_avg
+| sort -calls
+| head 10
+| rename INT_NUM as "Internal Number" TYPE as "Call Type" TERM_STATUS as "Disposition" calls as "Call Count" perc_total as "Percent Total" numbers_called as "Numbers Called" duration_min as "Duration Mins" duration_avg as "Average Duration"</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>By Disposition</title>
+        <search base="cdr">
+          <query>| stats count by TERM_STATUS
+| sort -count
+| head 10
+| eval TERM_STATUS=TERM_STATUS ."(".count.")"
+| rename TERM_STATUS as "Termination Status"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Distribution by Span Group (Allowed and Terminated)</title>
+        <search base="cdr">
+          <query>| stats count by SPANGROUP
+| sort -calls
+| eval SPANGROUP=SPANGROUP ."(".count.")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>Distribution by Switch Name (Allowed and Terminated)</title>
+        <search base="cdr">
+          <query>| stats count by SWITCH_NAME
+| sort -calls
+| eval SWITCH_NAME=SWITCH_NAME ."(".count.")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <search id="cdr">
+          <query>| dbxquery 
+timeout=1800
+connection=$etmInstance_token$
+query="
+SELECT  c.call_oid,
+        TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS') as START_TIME,
+        sw.SWITCH_NAME as SWITCH_NAME,
+    	NVL(DECODE(c.direction,1,c.destination,0,c.source),'UNDEFINED') AS EXT_NUM,
+        NVL(DECODE(c.direction,0,c.destination,1,c.source),'UNDEFINED') AS INT_NUM,
+	CASE 
+	  WHEN TO_CHAR(end_time,'YYYY-MM-DD') = '1970-01-01' THEN 'ACTIVE_CALL'
+	  ELSE TO_CHAR(ROUND((end_time-start_time)*24*60,2))
+	END as DUR_MIN,
+	CASE c.direction
+		WHEN 0 THEN 'IN'
+		WHEN 1 THEN 'OUT'
+		ELSE 'UNKNOWN'
+	END as DRCTN,
+	CALL_FLAGS as CALL_DETAILS,
+    CASE ca.types
+		WHEN 1   THEN 'FAX'
+		WHEN 2   THEN 'MODEM'
+		WHEN 4   THEN 'VOICE'
+    	WHEN 8   THEN 'UNDETERMINED'
+		WHEN 128 THEN 'BUSY'
+		WHEN 256 THEN 'UNANSWERED'
+		ELSE 'OTHER'
+    END AS TYPE,
+    a.array_name as SPANGROUP,
+    CASE t.disposition
+	    WHEN 0 THEN 'TERMINATED'
+	    WHEN 1 THEN 'TERMINATE-DISABLE'
+	    WHEN 2 THEN 'ALLOW'
+	    WHEN 3 THEN 'TERM_FAILED_CALL_ENDED'
+	    ELSE 'ALLOW'
+    END as TERM_STATUS
+    FROM 	((((((ACTIVE_CALL c JOIN ACTIVE_CALL_ADJUNCT ca ON c.CALL_OID=ca.CALL_OID)
+                   LEFT OUTER JOIN switch_contents sc ON c.sensor_oid=sc.sensor_oid)
+                   LEFT OUTER JOIN switch sw on sw.switch_oid=sc.switch_oid)
+                   LEFT OUTER JOIN terminations t ON c.call_oid=t.call_oid)
+                   LEFT OUTER JOIN array_contents ac ON c.sensor_oid = ac.sensor_oid)
+                   LEFT OUTER JOIN array a ON ac.array_oid = a.oid)
+    WHERE c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 0 AND
+          c.start_time &gt;= to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss') AND
+          c.start_time  &lt; to_date(utl_url.unescape('$test_token|u$'),'YYYY-MM-DD hh24:mi:ss')+(1/24) AND
+          --ap.policy_name = utl_url.unescape('$ipsPolicyName_token|u$')
+          a.array_name IN ($ipsPolicyName_token$)
+ORDER BY TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24:MI:SS')
+" shortnames=t 
+| TABLE START_TIME SWITCH_NAME EXT_NUM INT_NUM DUR_MIN DRCTN CALL_DETAILS TYPE SPANGROUP TERM_STATUS</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>6 Week Trend CDR</title>
+        <search id="trendcdr">
+          <query>| dbxquery 
+timeout=1800
+connection=$etmInstance_token$
+query="
+SELECT  
+        TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24') as START_TIME,
+        COUNT(c.call_oid) as CALLS,
+        COUNT(distinct source) as internal_numbers,
+        COUNT(distinct destination) as external_numbers
+FROM 	(((ACTIVE_CALL c JOIN ACTIVE_CALL_ADJUNCT ca ON c.CALL_OID=ca.CALL_OID)
+                   LEFT OUTER JOIN array_contents ac ON c.sensor_oid = ac.sensor_oid)
+                   LEFT OUTER JOIN array a ON ac.array_oid = a.oid)
+WHERE     c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 0 AND
+          c.start_time &gt;= to_date(utl_url.unescape('$test_token$'),'YYYY-MM-DD hh24:mi:ss') AND
+          c.start_time  &lt; to_date(utl_url.unescape('$test_token$'),'YYYY-MM-DD hh24:mi:ss')+(1/24) AND
+          --ap.policy_name = utl_url.unescape(''Ascend%20Enterprise'%2C'Gateway%20Enterprise'%2C'Ligon%20911'%2C'Ligon%20Enterprise'%2C'Southern%20Enterprise'')
+          a.array_name IN ($ipsPolicyName_token$)
+GROUP BY TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24')
+ORDER BY TO_CHAR(NEW_TIME(c.start_time,'GMT','CDT'),'YYYY-MM-DD HH24')
+" shortnames=t 
+| append
+[
+| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="
+SELECT  
+        to_char(start_time,'YYYY-MM-DD hh24') as start_time,
+        COUNT(c.call_oid) as CALLS,
+        COUNT(distinct internal_number) as internal_numbers,
+        COUNT(distinct external_number) as external_numbers
+FROM 	dw_fk_datawarehouse_nomodel c
+
+WHERE     --c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 'INBOUND' AND
+          start_time &gt;= TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '1 week' AND
+          start_time  &lt; TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '1 week' + interval '1 hour' AND 
+          datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '1 week' AND
+          datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '1 week' + interval '1 day' AND
+          span_group IN ($ipsPolicyName_token$)
+GROUP BY to_char(start_time,'YYYY-MM-DD hh24') 
+ORDER BY to_char(start_time,'YYYY-MM-DD hh24')
+" shortnames=t 
+| rename start_time as START_TIME
+| rename calls as CALLS
+| rename internal_numbers AS INTERNAL_NUMBERS
+| rename external_numbers AS EXTERNAL_NUMBERS
+]
+| append
+[
+| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="
+SELECT  
+        to_char(start_time,'YYYY-MM-DD hh24') as start_time,
+        COUNT(c.call_oid) as CALLS,
+        COUNT(distinct internal_number) as internal_numbers,
+        COUNT(distinct external_number) as external_numbers
+FROM 	dw_fk_datawarehouse_nomodel c
+
+WHERE     --c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 'INBOUND' AND
+          start_time &gt;= TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '2 week' AND
+          start_time  &lt; TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '2 week' + interval '1 hour' AND 
+          datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '2 week' AND
+          datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '2 week' + interval '1 day' AND
+          span_group IN ($ipsPolicyName_token$)
+GROUP BY to_char(start_time,'YYYY-MM-DD hh24') 
+ORDER BY to_char(start_time,'YYYY-MM-DD hh24')
+" shortnames=t 
+| rename start_time as START_TIME
+| rename calls as CALLS
+| rename internal_numbers AS INTERNAL_NUMBERS
+| rename external_numbers AS EXTERNAL_NUMBERS
+]
+| append
+[
+| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="
+SELECT  
+        to_char(start_time,'YYYY-MM-DD hh24') as start_time,
+        COUNT(c.call_oid) as CALLS,
+        COUNT(distinct internal_number) as internal_numbers,
+        COUNT(distinct external_number) as external_numbers
+FROM 	dw_fk_datawarehouse_nomodel c
+
+WHERE     --c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 'INBOUND' AND
+          start_time &gt;= TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' AND
+          start_time  &lt; TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' + interval '1 hour' AND 
+          datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' AND
+          datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' + interval '1 day' AND
+          span_group IN ($ipsPolicyName_token$)
+GROUP BY to_char(start_time,'YYYY-MM-DD hh24') 
+ORDER BY to_char(start_time,'YYYY-MM-DD hh24')
+" shortnames=t 
+| rename start_time as START_TIME
+| rename calls as CALLS
+| rename internal_numbers AS INTERNAL_NUMBERS
+| rename external_numbers AS EXTERNAL_NUMBERS
+]
+| append
+[
+| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="
+SELECT  
+        to_char(start_time,'YYYY-MM-DD hh24') as start_time,
+        COUNT(c.call_oid) as CALLS,
+        COUNT(distinct internal_number) as internal_numbers,
+        COUNT(distinct external_number) as external_numbers
+FROM 	dw_fk_datawarehouse_nomodel c
+
+WHERE     --c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 'INBOUND' AND
+          start_time &gt;= TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' AND
+          start_time  &lt; TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' + interval '1 hour' AND 
+          datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' AND
+          datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '3 week' + interval '1 day' AND
+          span_group IN ($ipsPolicyName_token$)
+GROUP BY to_char(start_time,'YYYY-MM-DD hh24') 
+ORDER BY to_char(start_time,'YYYY-MM-DD hh24')
+" shortnames=t 
+| rename start_time as START_TIME
+| rename calls as CALLS
+| rename internal_numbers AS INTERNAL_NUMBERS
+| rename external_numbers AS EXTERNAL_NUMBERS
+]
+| append
+[
+| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="
+SELECT  
+        to_char(start_time,'YYYY-MM-DD hh24') as start_time,
+        COUNT(c.call_oid) as CALLS,
+        COUNT(distinct internal_number) as internal_numbers,
+        COUNT(distinct external_number) as external_numbers
+FROM 	dw_fk_datawarehouse_nomodel c
+
+WHERE     --c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 'INBOUND' AND
+          start_time &gt;= TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '4 week' AND
+          start_time  &lt; TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '4 week' + interval '1 hour' AND 
+          datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '4 week' AND
+          datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '4 week' + interval '1 day' AND
+          span_group IN ($ipsPolicyName_token$)
+GROUP BY to_char(start_time,'YYYY-MM-DD hh24') 
+ORDER BY to_char(start_time,'YYYY-MM-DD hh24')
+" shortnames=t 
+| rename start_time as START_TIME
+| rename calls as CALLS
+| rename internal_numbers AS INTERNAL_NUMBERS
+| rename external_numbers AS EXTERNAL_NUMBERS
+]
+| append
+[
+| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="
+SELECT  
+        to_char(start_time,'YYYY-MM-DD hh24') as start_time,
+        COUNT(c.call_oid) as CALLS,
+        COUNT(distinct internal_number) as internal_numbers,
+        COUNT(distinct external_number) as external_numbers
+FROM 	dw_fk_datawarehouse_nomodel c
+
+WHERE     --c.call_flags &lt;&gt; 'CDRIMPORTED' AND
+          c.direction = 'INBOUND' AND
+          start_time &gt;= TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '5 week' AND
+          start_time  &lt; TO_TIMESTAMP('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '5 week' + interval '1 hour' AND 
+          datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '5 week' AND
+          datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') - interval '5 week' + interval '1 day' AND
+          span_group IN ($ipsPolicyName_token$)
+GROUP BY to_char(start_time,'YYYY-MM-DD hh24') 
+ORDER BY to_char(start_time,'YYYY-MM-DD hh24')
+" shortnames=t 
+| rename start_time as START_TIME
+| rename calls as CALLS
+| rename internal_numbers AS INTERNAL_NUMBERS
+| rename external_numbers AS EXTERNAL_NUMBERS
+]
+| TABLE START_TIME CALLS INTERNAL_NUMBERS EXTERNAL_NUMBERS</query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+</form>

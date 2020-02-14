@@ -1,0 +1,93 @@
+<form>
+  <label>ETM - IPS - Total Inbound Main Numbers - Active</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="dropdown" token="dataSource_token">
+      <label>Data Source</label>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+      </search>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+    </input>
+    <input type="dropdown" token="ipsPolicyName_token">
+      <label>IPS Policy Name</label>
+      <fieldForLabel>POLICY_NAME</fieldForLabel>
+      <fieldForValue>POLICY_NAME</fieldForValue>
+      <search>
+        <query>| dbxquery connection=$dataSource_token$ query="SELECT 
+    DISTINCT ap.POLICY_NAME
+FROM ADP_POLICY ap
+WHERE
+    ap.STATE = 'A' AND
+    (ap.POLICY_STATE = 2 OR ap.POLICY_STATE = 7) AND
+    (ap.POLICY_NAME &lt;&gt; 'Default' AND 
+     ap.POLICY_NAME NOT LIKE '%Test%' AND
+     ap.POLICY_NAME NOT LIKE '%Old%')
+ORDER BY POLICY_NAME"  shortnames=t 
+| table POLICY_NAME</query>
+      </search>
+    </input>
+    <input type="dropdown" token="cntDur_token">
+      <label>Count or Duration</label>
+      <choice value="CNT">Count</choice>
+      <choice value="DUR">Duration</choice>
+      <default>CNT</default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <chart>
+        <title>IPS Stats (GMT timezone)</title>
+        <search base="cdr">
+          <query>| chart sum(TOTAL_VALUE) as CALLS sum(TOTAL_THRESH) as THRESHOLD by INTERVAL_START_TIME</query>
+        </search>
+        <option name="charting.axisY2.enabled">0</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.overlayFields">THRESHOLD</option>
+        <option name="charting.chart.showDataLabels">none</option>
+        <option name="charting.drilldown">all</option>
+        <drilldown>
+          <link target="_blank">/app/search/etm__ips_total_inbound_main_numbers___active__details_single_hour?form.test_token=$click.value$&amp;form.dataSource_token=$dataSource_token$&amp;form.etmInstance_token=$etmInstance_token$&amp;form.ipsPolicyName_token=$ipsPolicyName_token$</link>
+        </drilldown>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Table Results</title>
+        <search id="cdr">
+          <query>| dbxquery 
+connection=$dataSource_token$
+query="
+SELECT  'ACTIVE' as tablename,
+        apr.COMMENTS, 
+        to_char(al.INTERVAL_START_TIME,'YYYY-MM-DD-hh24-mi-ss') as interval_start_time,
+        CASE    WHEN '$cntDur_token|u$'='CNT' THEN (al.COMPLETED_COUNT + al.CURRENT_COUNT)
+                WHEN '$cntDur_token|u$'='DUR' THEN ROUND((al.COMPLETED_DURATION + al.CURRENT_DURATION)/1000/60/60,1)
+                ELSE 0
+        END as TOTAL_VALUE,
+        CASE    WHEN '$cntDur_token|u$'='CNT' THEN ar.COUNT
+                WHEN '$cntDur_token|u$'='DUR' THEN (ar.DURATION/1000/60/60)
+                ELSE 0
+        END as TOTAL_THRESH
+ FROM (((ACTIVE_ADP_LOG al INNER JOIN ADP_POLICY ap ON al.policy_oid = ap.oid)
+        INNER JOIN ADP_POLICY_RULES apr ON (al.policy_oid = apr.policy_oid AND al.rule_oid=apr.rule_oid))
+        INNER JOIN ADP_RULES ar on (apr.rule_oid = ar.oid AND apr.version = ar.version))
+WHERE
+                     apr.COMMENTS LIKE '%Specific%' AND 
+                     utl_url.escape(ap.POLICY_NAME) = '$ipsPolicyName_token|u$'
+"
+shortnames=t
+| table COMMENTS INTERVAL_START_TIME TOTAL_THRESH TOTAL_VALUE
+| sort INTERVAL_START_TIME</query>
+          <earliest>0</earliest>
+          <latest></latest>
+        </search>
+        <option name="count">10</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+</form>

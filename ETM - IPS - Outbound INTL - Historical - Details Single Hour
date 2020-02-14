@@ -1,6 +1,6 @@
 <form>
   <label>ETM - IPS - Outbound INTL - Historical - Details Single Hour</label>
-  <fieldset submitButton="false" autoRun="true">
+  <fieldset submitButton="true" autoRun="true">
     <input type="dropdown" token="etmInstance_token">
       <label>Oracle Data Source</label>
       <fieldForLabel>customer</fieldForLabel>
@@ -27,7 +27,7 @@
     <input type="dropdown" token="ipsPolicyName_token">
       <label>IPS Policy</label>
       <fieldForLabel>POLICY_NAME</fieldForLabel>
-      <fieldForValue>POLICY_NAME</fieldForValue>
+      <fieldForValue>SPAN_GROUPS</fieldForValue>
       <search>
         <query>| dbxquery connection=$etmInstance_token$ query="
 SELECT ap.POLICY_NAME,
@@ -243,7 +243,8 @@ WHERE   (
         datekey &gt;=  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') AND
         datekey  &lt;  TO_DATE('$test_token$','YYYY-MM-DD-hh24-mi-ss') + interval '1 day' AND
         direction = 'OUTBOUND' AND
-        call_flags = 'INTL'
+        call_flags = 'INTL' AND
+        span_group IN ($ipsPolicyName_token$)
 "
 shortnames=t
 

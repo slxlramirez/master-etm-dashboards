@@ -1,0 +1,334 @@
+<dashboard>
+  <label>zzz_Drilldown - ETM - IPS - Total_Inbound - Historical (ETM Direct Only) Clone Clone</label>
+  <row>
+    <panel>
+      <table>
+        <title>Investigation Interval</title>
+        <search>
+          <query>| dbxquery 
+timeout=1800
+connection=$etmInstance_token$
+query="
+select to_char(to_date('19700101', 'YYYYMMDD') + ( 1 / 24 / 60 / 60) * $test_token$,'YYYY-MM-DD hh24:mi:ss') as interval1_default,
+TO_CHAR(FROM_TZ(CAST(to_date('19700101', 'YYYYMMDD') + ( 1 / 24 / 60 / 60) * $test_token$ AS TIMESTAMP), 'GMT') at time zone 'US/Central', 'YYYY-MM-DD HH:MI:SS') as interval2
+from dual
+"
+shortnames=t
+| table *</query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <single>
+        <title>Total Calls</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_MIN) as duration_min avg(DUR_MIN) as duration_avg
+| eval duration_avg=round(duration_avg,1)
+| table calls duration_min duration_avg
+| rename calls as "Total Call Count" duration_min as "Duration (mins)" duration_avg as "Avg Duration"</query>
+        </search>
+        <option name="colorMode">block</option>
+        <option name="drilldown">none</option>
+        <option name="useColors">1</option>
+      </single>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>by Disposition at 15secs Intervals</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count by TERM_STATUS</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>by Call Type at 15secs Intervals</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d %H:%M:%S")
+| timechart span=15s count by TYPE fixedrange=false</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>by Call Type</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_ANSWERED_MIN) as duration_min avg(DUR_ANSWERED_MIN) as duration_avg by CALL_TYPE
+| sort -calls</query>
+        </search>
+        <option name="drilldown">none</option>
+        <format type="number" field="duration_min">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="duration_min">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="duration_avg">
+          <option name="precision">1</option>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top 10 External Numbers</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_ANSWERED_MIN) as duration_min avg(DUR_ANSWERED_MIN) as duration_avg by EXTERNAL_NUMBER
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table EXTERNAL_NUMBER calls dur_answered_min  perc_total duration_min duration_avg
+| rename dur_answered_min as "External Number" 
+| sort -calls
+| head 10</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="duration_min">
+          <option name="precision">1</option>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Top 10 Internal Number</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_ANSWERED_MIN) as duration_min avg(DUR_ANSWERED_MIN) as duration_avg by INTERNAL_NUMBER
+| eventstats sum(calls) as totalcalls
+| eval duration_avg=round(duration_avg,1)
+| eval perc_total=calls/totalcalls
+| eval perc_total=round(perc_total,3)
+| eval perc_total=perc_total*100
+| table INTERNAL_NUMBER calls perc_total duration_min duration_avg 
+| rename INTERNAL_NUMBER as "Internal Number"
+| sort -calls
+| head 10</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="duration_min">
+          <option name="precision">1</option>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Calls by Internal to Destination (sorted by duration_min)</title>
+        <search base="cdr">
+          <query>| stats count as calls sum(DUR_ANSWERED_MIN) as duration_min avg(DUR_ANSWERED_MIN) as duration_avg by INTERNAL_NUMBER EXTERNAL_NUMBER 
+| eval duration_avg=round(duration_avg,1) 
+| sort -duration_min</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="duration_min">
+          <option name="precision">1</option>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>By Call Types</title>
+        <search base="cdr">
+          <query>| stats count by CALL_TYPE
+| sort -count
+| head 10
+| eval CALL_TYPE=CALL_TYPE ." (" . count . ")"
+| rename CALL_TYPE as "Call Types"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <chart>
+        <title>By Disposition</title>
+        <search base="cdr">
+          <query>| stats count by TERM_STATUS
+| sort -count
+| head 10
+| eval TERM_STATUS=TERM_STATUS ." (" . count . ")"
+| rename TERM_STATUS as "Termination Status"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <search id="cdr">
+          <query>| dbxquery 
+timeout=1800
+connection=$etmInstance_token$
+query="
+SELECT TO_DATE(TO_CHAR(c.start_time,'YYYYMMDD'),'YYYYMMDD') as datekey,
+       TO_DATE(TO_CHAR(c.start_time,'YYYYMMDD hh24'),'YYYYMMDD hh24') as datehourkey,
+        c.start_time,
+        ca.connect_time,
+        c.end_time,
+        coalesce(DECODE(c.direction,1,c.source,0,c.destination),'UNDEFINED') as internal_number,
+        coalesce(DECODE(c.direction,0,c.source,1,c.destination),'UNDEFINED') as external_number,
+        c.raw_dest,
+        (c.end_time-c.start_time)*24*60*60 as dur_offhook_sec,
+        CASE
+           WHEN ca.CONNECT_TIME IS NOT NULL THEN ((c.end_time-c.start_time)*24*60*60) - ((ca.CONNECT_TIME-c.START_TIME)*24*60*60)
+           ELSE 0
+        END as dur_answered_sec,
+        (c.end_time-c.start_time)*24*60 as dur_offhook_min,
+        CASE
+           WHEN ca.CONNECT_TIME IS NOT NULL THEN ((c.end_time-c.start_time)*24*60) - ((ca.CONNECT_TIME-c.START_TIME)*24*60)
+           ELSE 0
+        END as dur_answered_min,
+        CASE c.direction
+          WHEN 0 THEN 'INBOUND'
+          ELSE 'OUTBOUND'
+        END as direction,
+        c.suffix,
+        c.caller_id,
+        c.call_flags,
+        c.src_flags,
+        c.dest_flags,
+           case
+                 when ca.types = 1 then 'Fax'
+                 when ca.types = 2 then 'Modem'
+                 when ca.types = 4 then 'Voice'
+                 when ca.types = 5 then 'Fax,Voice'
+                 when ca.types = 6 then 'Modem, Voice'
+                 when ca.types = 8 then 'Undetermined'
+                 when ca.types = 128 then 'Busy'
+                 when ca.types = 256 then 'Unanswered'
+                 when ca.types = 512 then 'Wideband'
+                 when ca.types = 4096 then 'ModemEnergy'
+                 when ca.types = 4097 then 'ModemEnergy,Fax'
+                 when ca.types = 4100 then 'ModemEnergy,Voice'
+                 when ca.types = 4101 then 'ModemEnergy,Voice,Fax'
+                 when ca.types = 4102 then 'ModemEnergy,Modem,Voice'
+                 ELSE 'Other'
+    end as call_type,
+        CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+        END as term_status,
+        CASE x.protections
+          WHEN 1 THEN 'USER'
+           WHEN 2 THEN 'FIREWALL'
+          WHEN 4 THEN 'TELEWALL'
+          WHEN 8 THEN 'IPS'
+          ELSE 'NONE'
+        END as terminator,
+        sw.SWITCH_NAME as switch,
+        a.ARRAY_NAME as span_group,
+        e.APPLICATION_NAME as span,
+        c.CHANNEL
+FROM    (((((((call c INNER JOIN call_adjunct ca ON c.call_oid=ca.call_oid)
+            LEFT OUTER JOIN terminations x ON c.CALL_OID=x.CALL_OID)
+            INNER join etm_application e ON c.sensor_oid=e.application_oid)
+            LEFT OUTER JOIN switch_contents sc ON c.sensor_oid = sc.sensor_oid)
+            LEFT OUTER JOIN switch sw ON sw.switch_oid = sc.switch_oid)
+            LEFT OUTER JOIN array_contents ac ON c.sensor_oid = ac.sensor_oid)
+            LEFT OUTER JOIN array a ON ac.array_oid = a.oid)
+WHERE  c.start_time &gt;= to_date('19700101', 'YYYYMMDD') + ( 1 / 24 / 60 / 60) * $test_token$ AND
+       c.start_time  &lt; to_date('19700101', 'YYYYMMDD') + ( 1 / 24 / 60 / 60) * $test_token$ + (1/24) AND
+       c.direction = 0 AND
+       a.array_name IN 
+        (
+        SELECT  a.array_name as SPANGROUP
+        FROM 	((ADP_POLICY ap INNER JOIN ADP_POLICY_FILES apf ON ap.POLICY_ID=apf.POLICY_ID)
+                   LEFT OUTER JOIN ARRAY a ON a.ARRAY_ID=apf.ARRAY_ID)
+        WHERE     ap.policy_name = '$ipsPolicyName_token$'
+        )
+"
+shortnames=t
+| table *</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_SEC">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_SEC">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_ANSWERED_SEC">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_SEC">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_MIN">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_OFFHOOK_SEC">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_ANSWERED_SEC">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="DUR_ANSWERED_MIN">
+          <option name="precision">1</option>
+        </format>
+      </table>
+    </panel>
+  </row>
+</dashboard>

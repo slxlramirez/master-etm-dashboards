@@ -1,0 +1,110 @@
+<form>
+  <label>Firewall Rule Counts by Day/Week/Month - (ETM Direct)</label>
+  <fieldset submitButton="true" autoRun="true">
+    <input type="dropdown" token="dataSource_token">
+      <label>ETM Data Source</label>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+        <earliest>-15m</earliest>
+        <latest>now</latest>
+      </search>
+    </input>
+    <input type="dropdown" token="chartView_token">
+      <label>Chart View</label>
+      <choice value="1d">by Day</choice>
+      <choice value="1w">by Week</choice>
+      <choice value="1mon">by Month</choice>
+      <default>1d</default>
+      <fieldForLabel>Name</fieldForLabel>
+      <fieldForValue>Value</fieldForValue>
+    </input>
+    <input type="text" token="startDate_token">
+      <label>Start Date (YYYY-MM-DD)</label>
+    </input>
+    <input type="text" token="endDate_token">
+      <label>End Date (YYYY-MM-DD)</label>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <chart>
+        <title>by Day by FW Rule</title>
+        <search base="cdr">
+          <query>| eval _time=strptime(START_TIME,"%Y-%m-%d") 
+| timechart span=$chartView_token$ SUM(CALLS) by FW_RULE_COMMENTS</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Table Results</title>
+        <search id="cdr">
+          <query>| dbxquery 
+timeout=1800
+maxrows=500000
+connection=$dataSource_token$
+query="
+SELECT start_time,
+       fw_policy_name,
+       fw_rule_comments,
+       COUNT(call_oid) as calls
+FROM
+(
+        SELECT  a.call_oid,
+        a.POLICY_NAME as fw_policy_name,
+        start_time,
+        rtrim(XMLAGG(XMLELEMENT("X",a.RULE_NUM||',')).extract('//text()'),',') fw_rule_num,
+        rtrim(XMLAGG(XMLELEMENT("X",a.RULE_COMMENTS||',')).extract('//text()'),',') as fw_rule_comments
+            FROM
+            (
+            SELECT  TO_CHAR(c.call_oid) as call_oid,
+                    to_char(start_time,'YYYY-MM-DD') as start_time,
+                p.POLICY_NAME,
+                t.rule_num,
+                CASE t.rule_num
+                    WHEN 0 THEN 'DEFAULT EMRG'
+                    WHEN 9999 THEN 'DEFAULT ALLOW'
+                    ELSE pr.COMMENTS
+                END as rule_comments
+            FROM     (((CALL c INNER JOIN TRIGGER_LOG t ON c.CALL_OID=t.CALL_OID)
+                    INNER JOIN POLICY p ON p.OID=t.POLICY_OID)
+                    INNER JOIN POLICY_RULES pr ON t.POLICY_OID=pr.POLICY_OID and t.RULE_NUM=pr.RULE_NUM)
+            WHERE   c.START_TIME &gt;= TO_DATE('$startDate_token$','YYYY-MM-DD') AND
+                    c.START_TIME  &lt; TO_DATE('$endDate_token$'  ,'YYYY-MM-DD') AND
+                    t.rule_num &lt;&gt; 9999
+            ) a
+            GROUP BY a.call_oid, a.policy_name, start_time
+) foo
+GROUP BY fw_policy_name,
+         fw_rule_comments,
+         start_time
+ORDER BY fw_policy_name,
+         fw_rule_comments,
+         start_time,
+         COUNT(call_oid) DESC
+"
+shortnames=t 
+| table *
+| sort START_TIME FW_POLICY_NAME FW_RULE_COMMENTS CALLS</query>
+          <earliest>0</earliest>
+          <latest></latest>
+        </search>
+        <option name="count">10</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">cell</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</form>

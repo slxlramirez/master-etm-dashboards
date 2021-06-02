@@ -1,0 +1,401 @@
+<form>
+  <label>ETM Sales Dashboard - A Year in Review v2 - Date Control</label>
+  <fieldset submitButton="true" autoRun="false">
+    <input type="dropdown" token="dataSource_token">
+      <label>Data Source</label>
+      <search>
+        <query>|inputlookup etm_datasources.csv
+|table customer datasource</query>
+      </search>
+      <fieldForLabel>customer</fieldForLabel>
+      <fieldForValue>datasource</fieldForValue>
+    </input>
+    <input type="text" token="startDate_token">
+      <label>Start Date (YYYY-MM-DD)</label>
+    </input>
+    <input type="text" token="endDate_token">
+      <label>End Date (YYYY-MM-DD)</label>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <title>Firewall Rules</title>
+        <search id="fw_rules">
+          <query>| dbxquery 
+timeout=1800
+connection=$dataSource_token$
+query="
+SELECT  POLICY_NAME,
+        COMMENTS,
+        RULE_NUM,
+        CASE DIRECTION
+          WHEN 0 THEN 'ANY'
+          WHEN 1 THEN 'INBOUND'
+          WHEN 2 THEN 'OUTBOUND'
+          ELSE 'OTHER'
+        END as DIRECTION,
+        CASE ACTION
+          WHEN 1 THEN 'ALLOW'
+          WHEN 2 THEN 'TERMINATE'
+          ELSE 'OTHER'
+        END as ACTION
+FROM    POLICY p INNER JOIN POLICY_RULES pr ON p.OID=pr.POLICY_OID
+WHERE   p.POLICY_STATE = 2 AND p.STATE='A' AND RULE_NUM NOT IN (0,9999)
+"
+| table POLICY_NAME COMMENTS RULE_NUM DIRECTION ACTION
+| sort POLICY_NAME RULE_NUM</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>IPS Policy and Rules</title>
+        <search id="ips_rules">
+          <query>| dbxquery 
+connection=$dataSource_token$
+query="
+SELECT  POLICY_NAME,
+        RULE_NUM,
+        COMMENTS
+FROM    ADP_POLICY ap INNER JOIN ADP_POLICY_RULES apr ON ap.oid = apr.policy_oid
+WHERE   ap.POLICY_STATE IN (2,7) AND STATE='A' AND RULE_NUM NOT IN (0,9999)
+"
+shortnames=t
+| table POLICY_NAME COMMENTS RULE_NUM 
+| sort  POLICY_NAME RULE_NUM</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Terminated by Month</title>
+        <search base="fw_hits">
+          <query>| search TERM_STATUS="TERMINATED"
+| stats SUM(CALLS) as CALLS by DATEKEY FW_POLICY_NAME</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Calls by Firewall Policy and Rule</title>
+        <search base="fw_hits">
+          <query>| stats SUM(CALLS) as CALLS by FW_POLICY_NAME FW_RULE_COMMENTS
+| sort  FW_POLICY_NAME FW_RULE_COMMENTS</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>FW HITS BY MONTH</title>
+        <search id="fw_hits">
+          <query>| dbxquery 
+timeout=3600
+maxrows=500000
+connection=$dataSource_token$
+query="
+SELECT datekey, 
+       fw_policy_name,
+       fw_rule_comments,
+       term_status,
+       COUNT(call_oid) as calls
+FROM
+(
+        SELECT  a.call_oid,
+                a.datekey,
+                a.POLICY_NAME as fw_policy_name,
+                a.term_status,
+                rtrim(XMLAGG(XMLELEMENT("X",a.RULE_NUM||',')).extract('//text()'),',') fw_rule_num,
+                rtrim(XMLAGG(XMLELEMENT("X",a.RULE_COMMENTS||',')).extract('//text()'),',') as fw_rule_comments
+            FROM
+            (
+            SELECT  TO_CHAR(c.call_oid) as call_oid,
+                    TO_CHAR(c.start_time,'YYYY-MM') as datekey,
+                    p.POLICY_NAME,
+                    t.rule_num,
+                    CASE t.rule_num
+                      WHEN 0 THEN 'DEFAULT EMRG'
+                      WHEN 9999 THEN 'DEFAULT ALLOW'
+                      ELSE pr.COMMENTS
+                    END as rule_comments,
+                    CASE 
+                      WHEN t.DISPOSITION = 0 THEN 'TERMINATED'
+                      WHEN t.DISPOSITION = 1 THEN 'TERMINATED'
+                      WHEN t.DISPOSITION = 2 THEN 'TERMINATED'
+                      ELSE 'ALLOWED'
+                   END as term_status
+            FROM     ((((CALL c INNER JOIN TRIGGER_LOG t ON c.CALL_OID=t.CALL_OID)
+                               INNER JOIN POLICY p ON p.OID=t.POLICY_OID)
+                               INNER JOIN POLICY_RULES pr ON t.POLICY_OID=pr.POLICY_OID and t.RULE_NUM=pr.RULE_NUM)
+                               LEFT OUTER JOIN TERMINATIONS t ON c.CALL_OID=t.CALL_OID)
+            WHERE   c.START_TIME &gt;= TO_TIMESTAMP('$startDate_token$','YYYY-MM-DD') AND
+                    c.START_TIME  &lt; TO_TIMESTAMP('$endDate_token$','YYYY-MM-DD') AND
+                    t.rule_num &lt;&gt; 9999
+            ) a
+            GROUP BY a.call_oid, a.datekey, a.policy_name, a.term_status
+) foo
+GROUP BY datekey, 
+         fw_policy_name,
+         fw_rule_comments,
+         term_status
+ORDER BY datekey,
+         fw_policy_name,
+         fw_rule_comments,
+         term_status,
+         COUNT(call_oid) DESC
+"
+shortnames=t 
+| table DATEKEY FW_POLICY_NAME FW_RULE_COMMENTS TERM_STATUS CALLS</query>
+          <earliest>-15m</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>NVCL Allowed Calls</title>
+        <search base="nvcl_calls">
+          <query>| search TERM_STATUS="ALLOWED"
+| stats SUM(CALLS) as CALLS by DATEKEY
+| sort DATEKEY</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>NVCL Terminated Calls</title>
+        <search base="nvcl_calls">
+          <query>| search TERM_STATUS="TERMINATED"
+| stats SUM(CALLS) as CALLS by DATEKEY
+| sort DATEKEY</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>NVCL Calls</title>
+        <search id="nvcl_calls">
+          <query>| dbxquery 
+timeout=1800
+maxrows=500000
+connection=$dataSource_token$
+query="
+SELECT  TO_CHAR(c.START_TIME,'YYYY-MM') as datekey,
+        SOURCE,
+        CASE 
+             WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+             WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+             WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+             ELSE 'ALLOWED'
+        END as term_status,
+        COUNT(c.call_oid) as CALLS
+FROM    CALL c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+WHERE   c.START_TIME &gt;= TO_TIMESTAMP('$startDate_token$','YYYY-MM-DD') AND
+        c.START_TIME  &lt; TO_TIMESTAMP(  '$endDate_token$','YYYY-MM-DD') AND
+        c.DIRECTION = 0 AND
+        c.SOURCE IN
+        (
+          SELECT  CONCAT(CONCAT(CONCAT(CONCAT(CONCAT(CONCAT('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as directory_number
+          FROM    DIR_LISTING dl
+          WHERE   FIRST_NAME LIKE '%HCL%'
+        )
+GROUP BY TO_CHAR(c.START_TIME,'YYYY-MM'), 
+         SOURCE, 
+         CASE 
+             WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+             WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+             WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+             ELSE 'ALLOWED'
+         END
+ORDER BY TO_CHAR(c.START_TIME,'YYYY-MM'), COUNT(c.call_oid) DESC
+"
+shortnames=t 
+| table DATEKEY SOURCE TERM_STATUS CALLS</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Pending Scheduled Reports</title>
+        <search>
+          <query>| dbxquery 
+timeout=1800
+maxrows=100
+connection=$dataSource_token$
+query="
+SELECT  b.NAME, a.LAST_RUN_TIME
+FROM    SCH_RPT a LEFT OUTER JOIN REPORT_OBJECT b ON a.REPORT_OID=b.OID
+WHERE   STATUS=2
+"
+shortnames=t 
+| table NAME LAST_RUN_TIME</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Redirection Plans</title>
+        <search>
+          <query>| dbxquery 
+connection=$dataSource_token$
+query="
+SELECT NAME||' (UTA)' as REDIRECTION_PLAN,
+       COUNT(distinct RULE_NUM_B) RULES
+FROM
+(
+SELECT a.NAME,
+       a.COMMENTS,
+       a.VERSION,
+       b.OBJECT_SUBTYPE,
+       b.OBJECT_TYPE,
+       b.RULE_OBJ_OID,
+       CASE b.DATA_TYPE
+         WHEN 1 THEN 'SOURCE'
+         WHEN 2 THEN 'DESTINATION'
+         ELSE 'OTHER'
+       END as DATA_TYPE,
+       b.RULE_NUM as RULE_NUM_B,
+       c.RULE_NUM as RULE_NUM_C,
+       CASE c.DIRECTION
+         WHEN 0 THEN 'ANY'
+         WHEN 1 THEN 'INBOUND'
+         WHEN 2 THEN 'OUTBOUND'
+         ELSE 'OTHER'
+       END as DIRECTION,
+       CASE c.ACTION
+         WHEN 0 THEN 'MASKING'
+         WHEN 1 THEN 'REDIRECTION'
+         ELSE 'OTHER'
+       END as ACTION,
+       c.SRC_REPLACE,
+       c.SRC_DISPLAY_REPLACE,
+       c.DEST_REPLACE
+FROM    ((UTA_MASK_PLAN a LEFT OUTER JOIN UTA_MASK_RULE_DATA b ON a.OID=b.PLAN_OID)
+                          LEFT OUTER JOIN UTA_MASK_RULES c ON b.PLAN_OID=b.PLAN_OID AND b.RULE_NUM=c.RULE_NUM)
+WHERE  c.ACTION=1 
+) foo 
+GROUP BY NAME
+"
+shortnames=t
+| append
+[
+| dbxquery 
+connection=$dataSource_token$
+query="
+SELECT NAME||' (SIP)' as REDIRECTION_PLAN,
+       COUNT(distinct RULE_NUM_B) RULES
+FROM
+(
+SELECT a.NAME,
+       a.COMMENTS,
+       a.VERSION,
+       b.OBJECT_SUBTYPE,
+       b.OBJECT_TYPE,
+       b.RULE_OBJ_OID,
+       CASE b.DATA_TYPE
+         WHEN 1 THEN 'SOURCE'
+         WHEN 2 THEN 'DESTINATION'
+         ELSE 'OTHER'
+       END as DATA_TYPE,
+       b.RULE_NUM as RULE_NUM_B,
+       c.RULE_NUM as RULE_NUM_C,
+       CASE c.DIRECTION
+         WHEN 0 THEN 'ANY'
+         WHEN 1 THEN 'INBOUND'
+         WHEN 2 THEN 'OUTBOUND'
+         ELSE 'OTHER'
+       END as DIRECTION,
+       CASE c.ACTION
+         WHEN 0 THEN 'MASKING'
+         WHEN 1 THEN 'REDIRECTION'
+         ELSE 'OTHER'
+       END as ACTION,
+       c.SRC_REPLACE,
+       c.SRC_DISPLAY_REPLACE,
+       c.DEST_REPLACE
+FROM    ((SIP_MASK_PLAN a LEFT OUTER JOIN SIP_MASK_RULE_DATA b ON a.OID=b.PLAN_OID)
+                          LEFT OUTER JOIN SIP_MASK_RULES c ON b.PLAN_OID=b.PLAN_OID AND b.RULE_NUM=c.RULE_NUM)
+WHERE  c.ACTION=1 
+) foo 
+GROUP BY NAME
+"
+shortnames=t
+]
+| append
+[
+| dbxquery 
+connection=$dataSource_token$
+query="
+SELECT NAME||' (PRI)' as REDIRECTION_PLAN,
+       COUNT(distinct RULE_NUM_B) RULES
+FROM
+(
+SELECT a.NAME,
+       a.COMMENTS,
+       a.VERSION,
+       b.OBJECT_SUBTYPE,
+       b.OBJECT_TYPE,
+       b.RULE_OBJ_OID,
+       CASE b.DATA_TYPE
+         WHEN 1 THEN 'SOURCE'
+         WHEN 2 THEN 'DESTINATION'
+         ELSE 'OTHER'
+       END as DATA_TYPE,
+       b.RULE_NUM as RULE_NUM_B,
+       c.RULE_NUM as RULE_NUM_C,
+       CASE c.DIRECTION
+         WHEN 0 THEN 'ANY'
+         WHEN 1 THEN 'INBOUND'
+         WHEN 2 THEN 'OUTBOUND'
+         ELSE 'OTHER'
+       END as DIRECTION,
+       c.SRC_REPLACE,
+       c.DEST_REPLACE
+FROM    ((MASK_PLAN a LEFT OUTER JOIN MASK_RULE_DATA b ON a.OID=b.PLAN_OID)
+                          LEFT OUTER JOIN MASK_RULES c ON b.PLAN_OID=b.PLAN_OID AND b.RULE_NUM=c.RULE_NUM)
+WHERE  c.DIRECTION=1 
+) foo 
+GROUP BY NAME
+"
+shortnames=t
+]</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+</form>

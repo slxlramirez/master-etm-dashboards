@@ -124,8 +124,8 @@ FROM
             SELECT  TO_CHAR(c.call_oid) as call_oid,
                     TO_CHAR(c.start_time,'YYYY-MM') as datekey,
                     p.POLICY_NAME,
-                    t.rule_num,
-                    CASE t.rule_num
+                    tl.rule_num,
+                    CASE tl.rule_num
                       WHEN 0 THEN 'DEFAULT EMRG'
                       WHEN 9999 THEN 'DEFAULT ALLOW'
                       ELSE pr.COMMENTS
@@ -136,13 +136,13 @@ FROM
                       WHEN t.DISPOSITION = 2 THEN 'TERMINATED'
                       ELSE 'ALLOWED'
                    END as term_status
-            FROM     ((((CALL c INNER JOIN TRIGGER_LOG t ON c.CALL_OID=t.CALL_OID)
-                               INNER JOIN POLICY p ON p.OID=t.POLICY_OID)
-                               INNER JOIN POLICY_RULES pr ON t.POLICY_OID=pr.POLICY_OID and t.RULE_NUM=pr.RULE_NUM)
+            FROM     ((((CALL c INNER JOIN TRIGGER_LOG tl ON c.CALL_OID=tl.CALL_OID)
+                               INNER JOIN POLICY p ON p.OID=tl.POLICY_OID)
+                               INNER JOIN POLICY_RULES pr ON tl.POLICY_OID=pr.POLICY_OID and tl.RULE_NUM=pr.RULE_NUM)
                                LEFT OUTER JOIN TERMINATIONS t ON c.CALL_OID=t.CALL_OID)
             WHERE   c.START_TIME &gt;= TO_TIMESTAMP('$startDate_token$','YYYY-MM-DD') AND
                     c.START_TIME  &lt; TO_TIMESTAMP('$endDate_token$','YYYY-MM-DD') AND
-                    t.rule_num &lt;&gt; 9999
+                    tl.rule_num &lt;&gt; 9999
             ) a
             GROUP BY a.call_oid, a.datekey, a.policy_name, a.term_status
 ) foo
@@ -200,6 +200,13 @@ timeout=1800
 maxrows=500000
 connection=$dataSource_token$
 query="
+SELECT a.datekey,
+       a.source,
+       b.last_name,
+       a.term_status,
+       a.calls
+FROM
+(
 SELECT  TO_CHAR(c.START_TIME,'YYYY-MM') as datekey,
         SOURCE,
         CASE 
@@ -228,9 +235,16 @@ GROUP BY TO_CHAR(c.START_TIME,'YYYY-MM'),
              ELSE 'ALLOWED'
          END
 ORDER BY TO_CHAR(c.START_TIME,'YYYY-MM'), COUNT(c.call_oid) DESC
+) a LEFT OUTER JOIN
+(
+SELECT  CONCAT(CONCAT(CONCAT(CONCAT(CONCAT(CONCAT('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as directory_number,
+        dl.LAST_NAME
+FROM    DIR_LISTING dl
+WHERE   FIRST_NAME LIKE '%HCL%'
+) b ON a.source=b.directory_number
 "
 shortnames=t 
-| table DATEKEY SOURCE TERM_STATUS CALLS</query>
+| table DATEKEY SOURCE LAST_NAME TERM_STATUS CALLS</query>
           <earliest>-24h@h</earliest>
           <latest>now</latest>
         </search>

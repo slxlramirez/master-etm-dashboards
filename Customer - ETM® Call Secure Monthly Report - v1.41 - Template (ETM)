@@ -1,0 +1,797 @@
+<dashboard>
+  <label>Customer - ETM® Call Secure Monthly Report - v1.41 - St Louis County Main (ETM)</label>
+  <row>
+    <panel>
+      <table>
+        <search>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+query="
+SELECT CONCAT(CONCAT(CONCAT('Deliverable: ETM® System Monthly  - ',TO_CHAR(ADD_MONTHS(SYSDATE,-1),'Month')),' '),TO_CHAR(ADD_MONTHS(SYSDATE,-1),'YYYY')) as header FROM dual
+UNION 
+SELECT 'Business Partner: SecureLogix ' as header FROM dual
+" 
+shortnames=t</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Inbound Calls by Day by Disposition</title>
+        <search>
+          <progress>
+            <unset token="NOOP_1"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_1">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+query="
+SELECT   TRUNC(start_time,'DDD') as datekey, 
+         CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+         END as term_status,
+         COUNT(c.call_oid) as calls
+FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+WHERE    START_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+         START_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+         C.DIRECTION = 0
+GROUP BY TRUNC(start_time,'DDD'),
+         CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+         END
+ORDER BY TRUNC(start_time,'DDD'),
+         CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+         END
+" shortnames=t
+| eval _time=strptime(DATEKEY,"%Y-%m-%d %H:%M:%S.%N")
+| table CALLS DATEKEY TERM_STATUS _time
+| timechart sum(CALLS) by TERM_STATUS fixedrange=f</query>
+          <earliest>-1mon@mon</earliest>
+          <latest>@mon</latest>
+        </search>
+        <option name="charting.axisLabelsX.majorLabelStyle.rotation">45</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="charting.fieldColors">{"ALLOWED": 0x99cccc, "TERMINATED": 0x990000}</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Inbound Calls by Disposition</title>
+        <search>
+          <progress>
+            <unset token="NOOP_2"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_2">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+query="
+SELECT  CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+         END as term_status,
+         COUNT(c.call_oid) as calls
+FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+WHERE    START_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+         START_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+         C.DIRECTION = 0
+GROUP BY CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+         END
+ORDER BY CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+         END
+" shortnames=t
+| table TERM_STATUS CALLS
+| rename TERM_STATUS as "Disposition" CALLS as "Calls"
+| eval Disposition=Disposition ."(". Calls . ")"
+| eval a="$NOOP_1$"
+| fields - a</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.fieldColors">{"ALLOWED": 0x99cccc, "TERMINATED": 0x990000}</option>
+        <option name="height">260</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <table>
+        <title>Top 10  Inbound Callers (excl terminated calls)</title>
+        <search>
+          <progress>
+            <unset token="NOOP_3"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_3">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main
+timeout=1800
+query="
+SELECT taco.SOURCE, 
+       taco.CALLS, 
+       taco.DURATION_M, 
+       taco.SPREAD, 
+       salad.LAST_NAME
+FROM
+(
+  SELECT SOURCE, CALLS, DURATION_M, SPREAD
+  FROM
+ (
+  SELECT * FROM
+  (
+    SELECT   COALESCE(c.SOURCE,'UNDEFINED') as SOURCE,
+             COUNT(c.call_oid) as calls,
+             ROUND(SUM((c.end_time-c.start_time)*24*60),1) as duration_m,
+             COUNT(distinct destination) as spread
+    FROM     CALL c LEFT OUTER JOIN TERMINATIONS x ON c.call_oid=x.call_oid
+    WHERE    DIRECTION = 0  AND
+             x.DISPOSITION IS NULL AND
+             START_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+             START_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') 
+    GROUP BY SOURCE
+    ORDER BY COUNT(c.CALL_OID) DESC
+  ) foo 
+  WHERE ROWNUM &lt;= 100 AND duration_m &gt; 1
+ ) bar 
+  WHERE bar.SOURCE NOT IN
+         (
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM  ((DIR_GROUP dg INNER JOIN DIR_GROUP_CONTENTS dgc on dg.OID=dgc.OID)
+                INNER JOIN DIR_LISTING dl ON dgc.MEM_OID=dl.OID)
+         WHERE LOWER(dg.NAME) LIKE '%whitelist%'
+         UNION ALL
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM   DIR_LISTING dl
+         WHERE  LOWER(USER1) LIKE '%white%' 
+         )
+) taco LEFT OUTER JOIN
+(
+SELECT  LAST_NAME,
+        FIRST_NAME,
+        COMMENTS,
+        AUTH_NO,
+        directory_number as LISTING
+FROM
+(
+SELECT  directory_number,
+        LAST_NAME,
+        FIRST_NAME,
+        AUTH_NO,
+        COMMENTS,
+        row_number() over (partition by directory_number order by last_name) as rn
+FROM
+(
+SELECT  CONCAT(CONCAT(CONCAT(CONCAT(CONCAT(CONCAT('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as directory_number,
+        dl.LAST_NAME,
+        dl.FIRST_NAME,
+        dl.AUTH_NO,
+        dl.COMMENTS
+FROM    DIR_LISTING dl
+)
+) a WHERE rn=1
+ORDER BY directory_number
+) salad ON taco.SOURCE=salad.listing
+" shortnames=t
+| table SOURCE LAST_NAME CALLS DURATION_M SPREAD
+| sort -CALLS
+| head 10</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Outbound International by Day</title>
+        <search>
+          <progress>
+            <unset token="NOOP_4"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_4">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+timeout=1800
+query="
+SELECT   TRUNC(start_time,'DDD') as datekey, 
+         COUNT(c.call_oid) as calls,
+         ROUND(SUM((c.end_time-c.start_time)*24*60),1) as duration_m
+FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+WHERE    END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+         END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+         c.DIRECTION = 1 AND
+         c.CALL_FLAGS LIKE '%INTL%'
+GROUP BY TRUNC(start_time,'DDD')
+ORDER BY TRUNC(start_time,'DDD')
+" shortnames=t
+| eval _time=strptime(DATEKEY,"%Y-%m-%d %H:%M:%S.%N")
+| timechart fixedrange=f sum(CALLS) AS "Calls" sum(DURATION_M) as "Dur. (m)"
+| eval a="$NOOP_3$"
+| fields - a</query>
+          <earliest>-1mon@mon</earliest>
+          <latest>@mon</latest>
+        </search>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.overlayFields">"Dur. (m)"</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Top 10 Outbound INTL Callers by Count</title>
+        <search>
+          <progress>
+            <unset token="NOOP_5"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_5">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+query="
+SELECT * FROM
+(
+SELECT   source as internal_number, 
+         COUNT(c.call_oid) as calls,
+         ROUND(SUM((c.end_time-c.start_time)*24*60),1) as duration_m
+FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+WHERE    END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+         END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+         c.DIRECTION = 1 AND
+         c.CALL_FLAGS LIKE '%INTL%'
+GROUP BY source
+ORDER BY COUNT(c.call_oid) DESC
+) WHERE ROWNUM &lt;= 10
+" shortnames=t
+| table INTERNAL_NUMBER CALLS DURATION_M
+| rename CALLS as "Calls" INTERNAL_NUMBER as "Internal Number" DURATION_M as "Dur. (m)"
+| eval a="$NOOP_4$"
+| fields - a</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <chart>
+        <title>Top 10 Countries Called (Chart)</title>
+        <search base="top_countries">
+          <query>| chart sum(Calls) as calls by Country
+| eval Country=Country ."(". calls . ")"</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <table>
+        <title>Top 10 Countries Called (Table)</title>
+        <search id="top_countries">
+          <progress>
+            <unset token="NOOP_6"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_6">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+query="
+SELECT   regexp_substr(c.destination, '^\[(\d+)\]',1,1,'',1) as regioncode,
+         regexp_substr(c.destination, '^\[1\]\((\d{3})\)',1,1,'',1) as nationalnumber,
+         COUNT(c.call_oid) as calls,
+         ROUND(SUM((c.end_time-c.start_time)*24*60),1) as duration_m
+FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+WHERE    END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+         END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+         c.DIRECTION = 1 AND
+         c.CALL_FLAGS LIKE '%INTL%'
+GROUP BY regexp_substr(c.destination, '^\[(\d+)\]',1,1,'',1),
+         regexp_substr(c.destination, '^\[1\]\((\d{3})\)',1,1,'',1) 
+ORDER BY COUNT(c.call_oid) DESC
+" shortnames=t
+| table *
+| rename CALLS as calls DURATION_M as duration_m NATIONALNUMBER as nationalnumber REGIONCODE as regioncode
+| join type=left regioncode                 [| inputlookup ccmi_lookup_v2.csv | table regioncode country | where regioncode!=1 | dedup regioncode | sort 0 regioncode]
+| join type=left regioncode, nationalnumber [| inputlookup ccmi_lookup_v2.csv | table regioncode nationalnumber country | sort 0 regioncode]
+| stats sum(calls) as calls sum(duration_m) as duration_m by country
+| table country calls duration_m
+| sort -calls
+| head 10
+| rename calls as "Calls" country as "Country" duration_m as "Dur. (m)"
+| eval a="$NOOP_5$"
+| fields - a</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Call Count Spike Callers (Spikey)</title>
+      <table>
+        <title>At least 75 calls on 1 day / At least 50% of the total calls on 1 day / At least 1 days called in</title>
+        <search>
+          <progress>
+            <unset token="NOOP_7"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_7">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+timeout=1800
+maxrows=1000
+query="
+SELECT s.SOURCE, s.TOTAL_CALLS, s.DAYS_CALLED, s.MAX_CALLS, s.PERC_FROM_MAX_DAY, t.ENTRIES 
+FROM
+(
+   SELECT * 
+   FROM
+   (
+   SELECT  SOURCE,
+           SUM(calls) as total_calls,
+           MAX(calls) as max_calls,
+           ROUND(max(CALLS)/sum(CALLS),3)*100 as perc_from_max_day,
+           COUNT(DISTINCT datekey) as days_called
+   FROM
+    (
+    SELECT   TO_CHAR(start_time,'YYYY-MM-DD') as datekey,
+           SOURCE,
+           COUNT(c.call_oid) as calls
+    FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+    WHERE    END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+         END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+         x.DISPOSITION IS NULL AND
+         c.DIRECTION = 0
+    GROUP BY TO_CHAR(start_time,'YYYY-MM-DD'), SOURCE
+    ORDER BY COUNT(c.call_oid) DESC
+    ) bar
+    GROUP BY SOURCE
+    )
+    WHERE max_calls &gt; 75 and perc_from_max_day &gt;= 50 and days_called &gt; 1
+) s LEFT OUTER JOIN
+(
+SELECT dir_entries as SOURCE, COUNT(*) as entries
+FROM
+(
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM  ((DIR_GROUP dg INNER JOIN DIR_GROUP_CONTENTS dgc on dg.OID=dgc.OID)
+                INNER JOIN DIR_LISTING dl ON dgc.MEM_OID=dl.OID)
+         WHERE LOWER(dg.NAME) LIKE '%whitelist%'
+         UNION ALL
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM   DIR_LISTING dl
+         WHERE  LOWER(USER1) LIKE '%white%' 
+) group by dir_entries
+) t ON s.SOURCE=t.SOURCE
+WHERE t.ENTRIES IS NULL
+" shortnames=t
+| table SOURCE TOTAL_CALLS DAYS_CALLED MAX_CALLS PERC_FROM_MAX_DAY
+| sort -PERC_FROM_MAX_DAY
+| rename SOURCE as "External Number" TOTAL_CALLS as "Calls" MAX_CALLS as "Max Day" DAYS_CALLED as "Num Days Called" PERC_FROM_MAX_DAY as "% Max"
+| eval a="$NOOP_6$"
+| fields - a</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="% Max">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="% Max">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="Calls">
+          <option name="precision">0</option>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <title>High Call Distribution Callers (Spread)</title>
+      <table>
+        <title>High Calls (25+) / Low Avg Duration (&lt;1.5m) Callers (Low Value Calls)</title>
+        <search>
+          <progress>
+            <unset token="NOOP_8"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_8">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+timeout=1800
+query="
+SELECT s.SOURCE, s.CALLS, s.DURATION_M, s.SPREAD, s.AVG_DURATION, s.PERC_SPREAD
+FROM
+(
+SELECT * FROM
+(
+  SELECT   SOURCE,
+           CALLS,
+           SPREAD,
+           DURATION_M,
+           ROUND(DURATION_M/CALLS,1) as AVG_DURATION,
+           ROUND((SPREAD/CALLS)*100,1) as PERC_SPREAD
+  FROM 
+  (
+  SELECT   
+           SOURCE,
+           COUNT(c.call_oid) as calls,
+           COUNT(DISTINCT destination) as spread,
+           ROUND(SUM((c.end_time-c.start_time)*24*60),1) as duration_m
+  FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+  WHERE    END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+           END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+           x.DISPOSITION IS NULL AND
+           c.DIRECTION = 0 
+  GROUP BY SOURCE
+ ) a
+) b 
+WHERE CALLS &gt;= 25 and AVG_DURATION &lt; 1.5
+ORDER BY PERC_SPREAD DESC
+) s LEFT OUTER JOIN
+(
+SELECT dir_entries as SOURCE, COUNT(*) as entries
+FROM
+(
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM  ((DIR_GROUP dg INNER JOIN DIR_GROUP_CONTENTS dgc on dg.OID=dgc.OID)
+                INNER JOIN DIR_LISTING dl ON dgc.MEM_OID=dl.OID)
+         WHERE LOWER(dg.NAME) LIKE '%whitelist%'
+         UNION ALL
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM   DIR_LISTING dl
+         WHERE  LOWER(USER1) LIKE '%white%' 
+) group by dir_entries
+) t ON s.SOURCE=t.SOURCE
+WHERE t.ENTRIES IS NULL
+" shortnames=t
+| table SOURCE CALLS DURATION_M SPREAD AVG_DURATION PERC_SPREAD
+| sort -PERC_SPREAD
+| head 5
+| eval a="$NOOP_7$"
+| fields - a</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Terminated Callers</title>
+        <search>
+          <progress>
+            <unset token="NOOP_9"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_9">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+query="
+SELECT foo.SOURCE,
+       foo.CALLS,
+       bar.LAST_NAME
+FROM
+(
+SELECT * FROM (
+ SELECT   COALESCE(c.SOURCE,'UNDEFINED') as SOURCE,
+         COUNT(c.call_oid) as calls
+ FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+ WHERE    DIRECTION = 0 AND
+         x.DISPOSITION IS NOT NULL AND
+         END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+         END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+         c.SOURCE NOT IN
+         (
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+           FROM  ((DIR_GROUP dg INNER JOIN DIR_GROUP_CONTENTS dgc on dg.OID=dgc.OID)
+                INNER JOIN DIR_LISTING dl ON dgc.MEM_OID=dl.OID)
+           WHERE dg.NAME LIKE '%Whitelist%'
+         )
+ GROUP BY SOURCE
+ ORDER BY COUNT(c.CALL_OID) DESC
+ ) terminated
+ WHERE ROWNUM &lt;= 10
+) foo LEFT OUTER JOIN
+(
+SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as listing,
+       dl.LAST_NAME
+FROM   DIR_LISTING dl
+) bar ON foo.SOURCE=bar.listing
+" shortnames=t
+| table SOURCE LAST_NAME CALLS
+| rename SOURCE as "External Number" LAST_NAME as "Directory Lookup" CALLS as "Calls"
+| eval a="$NOOP_8$"
+| fields - a</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>ETM Firewall Rules</title>
+        <search>
+          <progress>
+            <unset token="NOOP_10"></unset>
+          </progress>
+          <done>
+            <set token="NOOP_10">noop</set>
+          </done>
+          <query>| dbxquery 
+connection=st_louis_county_main 
+timeout=1800
+query="
+            SELECT  p.POLICY_NAME as FW_POLICY_NAME,
+                    CASE t.rule_num
+                      WHEN 0 THEN 'DEFAULT EMRG'
+                      WHEN 9999 THEN 'DEFAULT ALLOW'
+                      ELSE pr.COMMENTS
+                    END as FW_RULE_COMMENTS,
+                    COUNT(c.call_oid) as CALLS
+            FROM    (((CALL c INNER JOIN TRIGGER_LOG t ON c.CALL_OID=t.CALL_OID)
+                              INNER JOIN POLICY p ON p.OID=t.POLICY_OID)
+                              INNER JOIN POLICY_RULES pr ON t.POLICY_OID=pr.POLICY_OID and t.RULE_NUM=pr.RULE_NUM)
+            WHERE   END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+                    END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month')
+            GROUP BY p.POLICY_NAME,
+                    CASE t.rule_num
+                      WHEN 0 THEN 'DEFAULT EMRG'
+                      WHEN 9999 THEN 'DEFAULT ALLOW'
+                      ELSE pr.COMMENTS
+                    END
+" shortnames=t
+| table FW_POLICY_NAME FW_RULE_COMMENTS CALLS
+| sort -CALLS</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="CALLS">
+          <option name="precision">0</option>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Negative Value Callers List - Top Callers</title>
+        <search id="hcl_cdr">
+          <query>| dbxquery 
+connection=st_louis_county_main 
+timeout=1800
+query="
+SELECT foo.SOURCE,
+       foo.TERM_STATUS,
+       foo.CALLS,
+       foo.SPREAD,
+       foo.DURATION_M,
+       foo.FIRST_NAME,
+       bar.ENTRIES
+FROM
+(
+SELECT a.SOURCE, a.TERM_STATUS, a.CALLS, a.SPREAD, a.DURATION_M, b.FIRST_NAME
+FROM
+(
+  SELECT   
+           SOURCE,
+           CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+           END as term_status,
+           COUNT(c.call_oid) as calls,
+           COUNT(DISTINCT destination) as spread,
+           ROUND(SUM((c.end_time-c.start_time)*24*60),1) as duration_m
+  FROM     call c LEFT OUTER JOIN terminations x ON c.call_oid=x.call_oid
+  WHERE    END_TIME &gt;= TRUNC(ADD_MONTHS(SYSDATE,-1),'Month') AND
+           END_TIME  &lt; TRUNC(ADD_MONTHS(SYSDATE, 0),'Month') AND
+           c.DIRECTION = 0 
+  GROUP BY SOURCE,
+           CASE
+            WHEN x.DISPOSITION = 0 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 1 THEN 'TERMINATED'
+            WHEN x.DISPOSITION = 2 THEN 'TERMINATED'
+            ELSE 'ALLOWED'
+           END
+) a LEFT OUTER JOIN
+(
+            SELECT FIRST_NAME,
+                   CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as directory_number
+            FROM   DIR_LISTING dl
+            WHERE  FIRST_NAME LIKE '%HCL%'
+) b ON a.SOURCE=b.DIRECTORY_NUMBER
+WHERE FIRST_NAME IS NOT NULL
+) foo LEFT OUTER JOIN
+(
+SELECT DIR_ENTRIES, COUNT(*) as ENTRIES
+FROM
+(
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM  ((DIR_GROUP dg INNER JOIN DIR_GROUP_CONTENTS dgc on dg.OID=dgc.OID)
+                INNER JOIN DIR_LISTING dl ON dgc.MEM_OID=dl.OID)
+         WHERE LOWER(dg.NAME) LIKE '%whitelist%'
+         UNION ALL
+         SELECT CONCAT(CONCAT(CONCAT(CONCAT(concat(concat('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as dir_entries
+         FROM   DIR_LISTING dl
+         WHERE  LOWER(USER1) LIKE '%white%' 
+) GROUP BY DIR_ENTRIES
+) bar ON foo.SOURCE=bar.DIR_ENTRIES
+WHERE bar.ENTRIES IS NULL
+" shortnames=t
+| table SOURCE CALLS DURATION_M SPREAD TERM_STATUS
+| join type=left SOURCE
+[
+| dbxquery 
+connection=st_louis_county_main 
+timeout=1800
+query="
+SELECT 
+        directory_number as source,
+        last_name as category
+FROM
+(
+SELECT  directory_number,
+        LAST_NAME,
+        FIRST_NAME,
+        AUTH_NO,
+        COMMENTS,
+        row_number() over (partition by directory_number order by last_name) as rn
+FROM
+(
+SELECT  CONCAT(CONCAT(CONCAT(CONCAT(CONCAT(CONCAT('[',dl.country_code),']'),'('),dl.area_code),')'),dl.local_num) as directory_number,
+        dl.LAST_NAME,
+        dl.FIRST_NAME,
+        dl.AUTH_NO,
+        dl.COMMENTS
+FROM    DIR_LISTING dl
+WHERE   dl.FIRST_NAME LIKE '%HCL%'
+)
+) a WHERE rn=1
+ORDER BY directory_number
+" shortnames=t
+| table SOURCE CATEGORY
+]
+| table SOURCE CATEGORY CALLS DURATION_M SPREAD TERM_STATUS
+| sort -CALLS
+| eval a="$NOOP_10$"
+| fields - a</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">5</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="calls">
+          <option name="precision">0</option>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <table>
+        <title>Negative Value Callers List (by Category)</title>
+        <search base="hcl_cdr">
+          <query>| stats sum(CALLS) as calls by CATEGORY
+| sort -calls</query>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="calls">
+          <option name="precision">0</option>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <chart>
+        <title>Negative Value Callers List (by Disposition)</title>
+        <search base="hcl_cdr">
+          <query>| stats sum(CALLS) as calls by TERM_STATUS
+| rename TERM_STATUS as term_status
+| eval term_status_new=term_status." (".calls.")"
+| table term_status_new calls
+| rename term_status_new as "Disposition" calls as "Calls"
+| table Disposition Calls
+| sort -Calls</query>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <table>
+        <title>Trademark, Patent and Copyright Information</title>
+        <search>
+          <query>| makeresults | eval footer="PolicyGuru® Solution | ETM® System"
+| append
+[
+| makeresults | eval footer="
+ETM, We See Your Voice, SecureLogix, and the SecureLogix Emblem are registered trademarks or registered trademarks and registered service marks of SecureLogix Corporation in the U.S.A. and other countries. PolicyGuru is a registered trademark of SecureLogix Corporation in the U.S.A. All other trademarks mentioned herein are believed to be trademarks of their respective owners."
+]
+| append
+[
+| makeresults | eval footer="© Copyright 2018 SecureLogix Corporation. All Rights Reserved.  This product is protected by one or more of the following patents: US 6,249,575 B1, US 6,320,948 B1, US 6,687,353 B1, US 6,718,024 B1, US 6,760,420 B2, US 6,760,421 B2, US 6,879,671 B1, US 7,133,511 B2, US 7,231,027 B2, US 7,440,558 B2, US 8,150,013 B2, CA 2,354,149, DE 1,415,459 B1, FR 1,415,459 B1, and GB 1,415,459 B1. U.S Patent Pending."
+]
+| table footer
+| rename footer as "SecureLogix TPC"</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+</dashboard>
